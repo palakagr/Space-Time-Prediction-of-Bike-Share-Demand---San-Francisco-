@@ -160,5 +160,115 @@ sfBike_census <- st_join(sfBike %>%
   mutate(end_station_longitude = unlist(map(geometry, 1)),
          end_station_latitude = unlist(map(geometry, 2)))%>%
   as.data.frame() %>%
-  select(-geometry)
+  select(-geometry)  %>%
+  st_as_sf(., coords = c("start_station_longitude", "start_station_latitude"), crs = 4326) %>%
+  st_transform('ESRI:102241')
 
+sfBikeonly <- st_intersection(sfBike_census, st_union(neighborhoods))
+
+ggplot()+
+  geom_sf(data = sfCounty,color = "transparent")+
+  geom_sf(data = sfBikeonly, show.legend = "point")
+
+## Weather Data
+
+weather.Panel <- 
+  riem_measures(station = "SFO", date_start = "2018-03-01", date_end = "2018-04-30") %>%
+  dplyr::select(valid, tmpf, p01i, sknt)%>%
+  replace(is.na(.), 0) %>%
+  mutate(interval60 = ymd_h(substr(valid,1,13))) %>%
+  mutate(week = week(interval60),
+         dotw = wday(interval60, label=TRUE)) %>%
+  group_by(interval60) %>%
+  summarize(Temperature = max(tmpf),
+            Precipitation = sum(p01i),
+            Wind_Speed = max(sknt)) %>%
+  mutate(Temperature = ifelse(Temperature == 0, 42, Temperature))
+
+glimpse(weather.Panel)
+
+grid.arrange(
+  ggplot(weather.Panel, aes(interval60,Precipitation)) + geom_line() + 
+    labs(title="Percipitation", x="Hour", y="Perecipitation") + plotTheme,
+  ggplot(weather.Panel, aes(interval60,Wind_Speed)) + geom_line() + 
+    labs(title="Wind Speed", x="Hour", y="Wind Speed") + plotTheme,
+  ggplot(weather.Panel, aes(interval60,Temperature)) + geom_line() + 
+    labs(title="Temperature", x="Hour", y="Temperature") + plotTheme,
+  top="Weather Data - San Francisco SFO - March-April, 2018")
+
+## Exploratory analysis 
+
+ggplot(sfBikeonly %>%
+         group_by(interval60) %>%
+         tally())+
+  geom_line(aes(x = interval60, y = n))+
+  labs(title="Bike share trips per hr. SF, March, 2018",
+       x="Date", 
+       y="Number of trips")+
+  plotTheme
+
+sfBikeonly %>%
+  mutate(time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush"))%>%
+  group_by(interval60, start_station_name, time_of_day) %>%
+  tally()%>%
+  group_by(start_station_name, time_of_day)%>%
+  summarize(mean_trips = mean(n))%>%
+  ggplot()+
+  geom_histogram(aes(mean_trips), binwidth = 1)+
+  labs(title="Mean Number of Hourly Trips Per Station. SF, March-April, 2018",
+       x="Number of trips", 
+       y="Frequency")+
+  facet_wrap(~time_of_day)+
+  plotTheme
+
+ggplot(sfBikeonly %>%
+         group_by(interval60, start_station_name) %>%
+         tally())+
+  geom_histogram(aes(n), binwidth = 5)+
+  labs(title="Bike share trips per hr by station. SF, March-April, 2018",
+       x="Trip Counts", 
+       y="Number of Stations")+
+  plotTheme
+
+
+ggplot(sfBikeonly %>% mutate(hour = hour(start_time)))+
+  geom_freqpoly(aes(hour, color = dotw), binwidth = 1)+
+  labs(title="Bike share trips in Chicago, by day of the week, May, 2018",
+       x="Hour", 
+       y="Trip Counts")+
+  plotTheme
+
+
+ggplot(sfBikeonly %>% 
+         mutate(hour = hour(start_time),
+                weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday")))+
+  geom_freqpoly(aes(hour, color = weekend), binwidth = 1)+
+  labs(title="Bike share trips in Chicago - weekend vs weekday, May, 2018",
+       x="Hour", 
+       y="Trip Counts")+
+  plotTheme
+
+ggplot()+
+  geom_sf(data = sfCounty %>%
+            st_transform(crs=4326))+
+  geom_point(data = sfBikeonly %>% 
+               mutate(hour = hour(start_time),
+                      weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+                      time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                              hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                              hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                              hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush"))%>%
+               group_by(start_station_id, start_station_latitude, start_station_longitude, weekend, time_of_day) %>%
+               tally(),
+             aes(x=start_station_longitude, y = start_station_latitude, color = n), 
+             fill = "transparent", alpha = 0.4, size = 0.3)+
+  scale_colour_viridis(direction = -1,
+                       discrete = FALSE, option = "D")+
+  ylim(min(dat_census$from_latitude), max(dat_census$from_latitude))+
+  xlim(min(dat_census$from_longitude), max(dat_census$from_longitude))+
+  facet_grid(weekend ~ time_of_day)+
+  labs(title="Bike share trips per hr by station. Chicago, May, 2018")+
+  mapTheme
