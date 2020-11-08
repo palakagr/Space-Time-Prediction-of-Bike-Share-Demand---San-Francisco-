@@ -97,7 +97,7 @@ sfCensus <-
           year = 2018, 
           state = 06, 
           geometry = TRUE, 
-          county=075,
+          county=c(001,075,081,013,085),
           output = "wide") %>%
   rename(Total_Pop =  B01003_001E,
          Med_Inc = B19013_001E,
@@ -113,11 +113,18 @@ sfCensus <-
          GEOID, geometry) %>%
   mutate(Percent_White = White_Pop / Total_Pop,
          Mean_Commute_Time = Travel_Time / Total_Public_Trans,
-         Percent_Taking_Public_Trans = Total_Public_Trans / Means_of_Transport)
+         Percent_Taking_Public_Trans = Total_Public_Trans / Means_of_Transport) %>%
+  st_transform('ESRI:102241')
 
-ggplot()+
-  geom_sf(data = sfCensus, aes(fill = Percent_White)) +
-  mapTheme() + theme(legend.position="bottom")
+sfTracts <- 
+  sfCensus %>%
+  as.data.frame() %>%
+  distinct(GEOID, .keep_all = TRUE) %>%
+  select(GEOID, geometry) %>% 
+  st_sf
+
+ggplot() +
+  geom_sf(data = sfTracts)
 
 ## Creating time interval
 sfBike <- sf_bike %>%
@@ -127,3 +134,31 @@ sfBike <- sf_bike %>%
          dotw = wday(interval60, label=TRUE))
 
 glimpse(sfBike)
+
+## Adding census data to bike data
+sfBike_census <- st_join(sfBike %>% 
+                        filter(is.na(start_station_longitude) == FALSE &
+                                 is.na(start_station_latitude) == FALSE &
+                                 is.na(end_station_latitude) == FALSE &
+                                 is.na(end_station_longitude) == FALSE) %>%
+                        st_as_sf(., coords = c("start_station_longitude", "start_station_latitude"), crs = 4326),
+                      sfTracts %>%
+                        st_transform(crs=4326),
+                      join=st_intersects,
+                          left = TRUE) %>%
+  rename(Origin.Tract = GEOID) %>%
+  mutate(start_station_longitude = unlist(map(geometry, 1)),
+         start_station_latitude = unlist(map(geometry, 2)))%>%
+  as.data.frame() %>%
+  select(-geometry)%>%
+  st_as_sf(., coords = c("end_station_longitude", "end_station_latitude"), crs = 4326) %>%
+  st_join(., sfTracts %>%
+            st_transform(crs=4326),
+          join=st_intersects,
+          left = TRUE) %>%
+  rename(Destination.Tract = GEOID)  %>%
+  mutate(end_station_longitude = unlist(map(geometry, 1)),
+         end_station_latitude = unlist(map(geometry, 2)))%>%
+  as.data.frame() %>%
+  select(-geometry)
+
