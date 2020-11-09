@@ -362,3 +362,105 @@ week_predictions <-
          sd_AE = map_dbl(Absolute_Error, sd, na.rm = TRUE))
 
 week_predictions
+
+week_predictions %>%
+  dplyr::select(week, Regression, MAE) %>%
+  gather(Variable, MAE, -Regression, -week) %>%
+  ggplot(aes(week, MAE)) + 
+  geom_bar(aes(fill = Regression), position = "dodge", stat="identity") +
+  scale_fill_manual(values = palette5) +
+  labs(title = "Mean Absolute Errors by model specification and week") +
+  plotTheme
+
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id)) %>%
+  dplyr::select(interval60, start_station_id, Observed, Prediction, Regression) %>%
+  unnest() %>%
+  gather(Variable, Value, -Regression, -interval60, -start_station_id) %>%
+  group_by(Regression, Variable, interval60) %>%
+  summarize(Value = sum(Value)) %>%
+  ggplot(aes(interval60, Value, colour=Variable)) + 
+  geom_line(size = 1.1) + 
+  facet_wrap(~Regression, ncol=1) +
+  labs(title = "Predicted/Observed bike share time series", subtitle = "Chicago; A test set of 2 weeks",  x = "Hour", y= "Station Trips") +
+  plotTheme
+
+
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id), 
+         start_station_latitude = map(data, pull, start_station_latitude), 
+         start_station_longitude = map(data, pull, start_station_longitude)) %>%
+  select(interval60, start_station_id, start_station_longitude, start_station_latitude, Observed, Prediction, Regression) %>%
+  unnest() %>%
+  filter(Regression == "ETime_Space_FE_timeLags") %>%
+  group_by(start_station_id, start_station_longitude, start_station_latitude) %>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+  ggplot(.)+
+  geom_sf(data = sfCensus, color = "grey", fill = "transparent")+
+  geom_point(aes(x = start_station_longitude, y = start_station_latitude, color = MAE), 
+             fill = "transparent", alpha = 0.4)+
+  scale_colour_viridis(direction = -1,
+                       discrete = FALSE, option = "D")+
+  ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
+  xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
+  labs(title="Mean Abs Error, Test Set, Model 4")+
+  mapTheme
+
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id), 
+         start_station_latitude = map(data, pull, start_station_latitude), 
+         start_station_longitude = map(data, pull, start_station_longitude),
+         dotw = map(data, pull, dotw)) %>%
+  select(interval60, start_station_id, start_station_longitude, 
+         start_station_latitude, Observed, Prediction, Regression,
+         dotw) %>%
+  unnest() %>%
+  filter(Regression == "ETime_Space_FE_timeLags")%>%
+  mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+         time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush"))%>%
+  ggplot()+
+  geom_point(aes(x= Observed, y = Prediction))+
+  geom_smooth(aes(x= Observed, y= Prediction), method = "lm", se = FALSE, color = "red")+
+  geom_abline(slope = 1, intercept = 0)+
+  facet_grid(time_of_day~weekend)+
+  labs(title="Observed vs Predicted",
+       x="Observed trips", 
+       y="Predicted trips")+
+  plotTheme
+
+
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id), 
+         start_station_latitude = map(data, pull, start_station_latitude), 
+         start_station_longitude = map(data, pull, start_station_longitude),
+         dotw = map(data, pull, dotw) ) %>%
+  select(interval60, start_station_id, start_station_longitude, 
+         start_station_latitude, Observed, Prediction, Regression,
+         dotw) %>%
+  unnest() %>%
+  filter(Regression == "ETime_Space_FE_timeLags")%>%
+  mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+         time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush")) %>%
+  group_by(start_station_id, weekend, time_of_day, start_station_longitude, start_station_latitude) %>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+  ggplot(.)+
+  geom_sf(data = sfCensus, color = "grey", fill = "transparent")+
+  geom_point(aes(x = start_station_longitude, y = start_station_latitude, color = MAE), 
+             fill = "transparent", size = 0.5, alpha = 0.4)+
+  scale_colour_viridis(direction = -1,
+                       discrete = FALSE, option = "D")+
+  ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
+  xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
+  facet_grid(weekend~time_of_day)+
+  labs(title="Mean Absolute Errors, Test Set")+
+  mapTheme
