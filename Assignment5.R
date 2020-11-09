@@ -131,7 +131,8 @@ sfBike <- sf_bike %>%
   mutate(interval60 = floor_date(ymd_hms(start_time), unit = "hour"),
          interval15 = floor_date(ymd_hms(start_time), unit = "15 mins"),
          week = week(interval60),
-         dotw = wday(interval60, label=TRUE))
+         dotw = wday(interval60, label=TRUE)) %>%
+  filter(week < 15)
 
 glimpse(sfBike)
 
@@ -160,15 +161,7 @@ sfBike_census <- st_join(sfBike %>%
   mutate(end_station_longitude = unlist(map(geometry, 1)),
          end_station_latitude = unlist(map(geometry, 2)))%>%
   as.data.frame() %>%
-  select(-geometry)  %>%
-  st_as_sf(., coords = c("start_station_longitude", "start_station_latitude"), crs = 4326) %>%
-  st_transform('ESRI:102241')
-
-sfBikeonly <- st_intersection(sfBike_census, st_union(neighborhoods))
-
-ggplot()+
-  geom_sf(data = sfCounty,color = "transparent")+
-  geom_sf(data = sfBikeonly, show.legend = "point")
+  select(-geometry)
 
 ## Weather Data
 
@@ -198,16 +191,16 @@ grid.arrange(
 
 ## Exploratory analysis 
 
-ggplot(sfBikeonly %>%
+ggplot(sfBike_census %>%
          group_by(interval60) %>%
          tally())+
   geom_line(aes(x = interval60, y = n))+
-  labs(title="Bike share trips per hr. SF, March, 2018",
+  labs(title="Bike share trips per hr. Bay Area, March, 2018",
        x="Date", 
        y="Number of trips")+
   plotTheme
 
-sfBikeonly %>%
+sfBike_census %>%
   mutate(time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
                                  hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
                                  hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
@@ -224,7 +217,7 @@ sfBikeonly %>%
   facet_wrap(~time_of_day)+
   plotTheme
 
-ggplot(sfBikeonly %>%
+ggplot(sfBike_census %>%
          group_by(interval60, start_station_name) %>%
          tally())+
   geom_histogram(aes(n), binwidth = 5)+
@@ -234,7 +227,7 @@ ggplot(sfBikeonly %>%
   plotTheme
 
 
-ggplot(sfBikeonly %>% mutate(hour = hour(start_time)))+
+ggplot(sfBike_census %>% mutate(hour = hour(start_time)))+
   geom_freqpoly(aes(hour, color = dotw), binwidth = 1)+
   labs(title="Bike share trips in Chicago, by day of the week, May, 2018",
        x="Hour", 
@@ -242,7 +235,7 @@ ggplot(sfBikeonly %>% mutate(hour = hour(start_time)))+
   plotTheme
 
 
-ggplot(sfBikeonly %>% 
+ggplot(sfBike_census %>% 
          mutate(hour = hour(start_time),
                 weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday")))+
   geom_freqpoly(aes(hour, color = weekend), binwidth = 1)+
@@ -252,9 +245,9 @@ ggplot(sfBikeonly %>%
   plotTheme
 
 ggplot()+
-  geom_sf(data = sfCounty %>%
+  geom_sf(data = sfTracts %>%
             st_transform(crs=4326))+
-  geom_point(data = sfBikeonly %>% 
+  geom_point(data = sfBike_census %>% 
                mutate(hour = hour(start_time),
                       weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
                       time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
@@ -267,8 +260,105 @@ ggplot()+
              fill = "transparent", alpha = 0.4, size = 0.3)+
   scale_colour_viridis(direction = -1,
                        discrete = FALSE, option = "D")+
-  ylim(min(dat_census$from_latitude), max(dat_census$from_latitude))+
-  xlim(min(dat_census$from_longitude), max(dat_census$from_longitude))+
+  ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
+  xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
   facet_grid(weekend ~ time_of_day)+
   labs(title="Bike share trips per hr by station. Chicago, May, 2018")+
   mapTheme
+
+## Space-time series
+length(unique(sfBike_census$interval60)) * length(unique(sfBike_census$start_station_id))
+
+study.panel <- 
+  expand.grid(interval60=unique(sfBike_census$interval60), 
+              start_station_id = unique(sfBike_census$start_station_id)) %>%
+  left_join(., sfBike_census %>%
+              select(start_station_id, start_station_name, Origin.Tract, start_station_longitude, start_station_latitude )%>%
+              distinct() %>%
+              group_by(start_station_id) %>%
+              slice(1))
+
+nrow(study.panel)      
+
+## Ride Panel
+ride.panel <- 
+  sfBike_census %>%
+  mutate(Trip_Counter = 1) %>%
+  right_join(study.panel) %>% 
+  group_by(interval60, start_station_id, start_station_name, Origin.Tract, start_station_longitude, start_station_latitude) %>%
+  summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>%
+  left_join(weather.Panel) %>%
+  ungroup() %>%
+  filter(is.na(start_station_id) == FALSE) %>%
+  mutate(week = week(interval60),
+         dotw = wday(interval60, label = TRUE)) %>%
+  filter(is.na(Origin.Tract) == FALSE)
+
+ride.panel <- 
+  left_join(ride.panel, sfCensus %>%
+              as.data.frame() %>%
+              select(-geometry), by = c("Origin.Tract" = "GEOID"))
+
+## Time Lag
+ride.panel <- 
+  ride.panel %>% 
+  arrange(start_station_id, interval60) %>% 
+  mutate(lagHour = dplyr::lag(Trip_Count,1),
+         lag2Hours = dplyr::lag(Trip_Count,2),
+         lag3Hours = dplyr::lag(Trip_Count,3),
+         lag4Hours = dplyr::lag(Trip_Count,4),
+         lag12Hours = dplyr::lag(Trip_Count,12),
+         lag1day = dplyr::lag(Trip_Count,24)) %>%
+  mutate(day = yday(interval60))
+
+as.data.frame(ride.panel) %>%
+  group_by(interval60) %>% 
+  summarise_at(vars(starts_with("lag"), "Trip_Count"), mean, na.rm = TRUE) %>%
+  gather(Variable, Value, -interval60, -Trip_Count) %>%
+  mutate(Variable = factor(Variable, levels=c("lagHour","lag2Hours","lag3Hours","lag4Hours",
+                                              "lag12Hours","lag1day")))%>%
+  group_by(Variable) %>%  
+  summarize(correlation = round(cor(Value, Trip_Count),2))
+
+## Regression
+ride.Train <- filter(ride.panel, week <= 12)
+ride.Test <- filter(ride.panel, week > 12)
+
+### 5 regressions
+reg1 <- 
+  lm(Trip_Count ~  hour(interval60) + dotw + Temperature,  data=ride.Train)
+
+reg2 <- 
+  lm(Trip_Count ~  start_station_name + dotw + Temperature,  data=ride.Train)
+
+reg3 <- 
+  lm(Trip_Count ~  start_station_name + hour(interval60) + dotw + Temperature + Precipitation, 
+     data=ride.Train)
+
+reg4 <- 
+  lm(Trip_Count ~  start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
+       lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day, 
+     data=ride.Train)
+
+
+## Predicting 
+ride.Test.weekNest <- 
+  ride.Test %>%
+  nest(-week) 
+
+model_pred <- function(dat, fit){
+  pred <- predict(fit, newdata = dat)}
+
+week_predictions <- 
+  ride.Test.weekNest %>% 
+  mutate(ATime_FE = map(.x = data, fit = reg1, .f = model_pred),
+         BSpace_FE = map(.x = data, fit = reg2, .f = model_pred),
+         CTime_Space_FE = map(.x = data, fit = reg3, .f = model_pred),
+         DTime_Space_FE_timeLags = map(.x = data, fit = reg4, .f = model_pred)) %>% 
+  gather(Regression, Prediction, -data, -week) %>%
+  mutate(Observed = map(data, pull, Trip_Count),
+         Absolute_Error = map2(Observed, Prediction,  ~ abs(.x - .y)),
+         MAE = map_dbl(Absolute_Error, mean, na.rm = TRUE),
+         sd_AE = map_dbl(Absolute_Error, sd, na.rm = TRUE))
+
+week_predictions
