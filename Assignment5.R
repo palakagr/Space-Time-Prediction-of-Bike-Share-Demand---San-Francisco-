@@ -394,7 +394,7 @@ week_predictions %>%
          start_station_longitude = map(data, pull, start_station_longitude)) %>%
   select(interval60, start_station_id, start_station_longitude, start_station_latitude, Observed, Prediction, Regression) %>%
   unnest() %>%
-  filter(Regression == "ETime_Space_FE_timeLags") %>%
+  filter(Regression == "DTime_Space_FE_timeLags") %>%
   group_by(start_station_id, start_station_longitude, start_station_latitude) %>%
   summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
   ggplot(.)+
@@ -418,7 +418,7 @@ week_predictions %>%
          start_station_latitude, Observed, Prediction, Regression,
          dotw) %>%
   unnest() %>%
-  filter(Regression == "ETime_Space_FE_timeLags")%>%
+  filter(Regression == "DTime_Space_FE_timeLags")%>%
   mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
          time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
                                  hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
@@ -445,7 +445,7 @@ week_predictions %>%
          start_station_latitude, Observed, Prediction, Regression,
          dotw) %>%
   unnest() %>%
-  filter(Regression == "ETime_Space_FE_timeLags")%>%
+  filter(Regression == "DTime_Space_FE_timeLags")%>%
   mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
          time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
                                  hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
@@ -464,3 +464,35 @@ week_predictions %>%
   facet_grid(weekend~time_of_day)+
   labs(title="Mean Absolute Errors, Test Set")+
   mapTheme
+
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         from_station_id = map(data, pull, from_station_id), 
+         from_latitude = map(data, pull, from_latitude), 
+         from_longitude = map(data, pull, from_longitude),
+         dotw = map(data, pull, dotw),
+         Percent_Taking_Public_Trans = map(data, pull, Percent_Taking_Public_Trans),
+         Med_Inc = map(data, pull, Med_Inc),
+         Percent_White = map(data, pull, Percent_White)) %>%
+  select(interval60, from_station_id, from_longitude, 
+         from_latitude, Observed, Prediction, Regression,
+         dotw, Percent_Taking_Public_Trans, Med_Inc, Percent_White) %>%
+  unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags_holidayLags")%>%
+  mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+         time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush")) %>%
+  filter(time_of_day == "AM Rush") %>%
+  group_by(from_station_id, Percent_Taking_Public_Trans, Med_Inc, Percent_White) %>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+  gather(-from_station_id, -MAE, key = "variable", value = "value")%>%
+  ggplot(.)+
+  #geom_sf(data = chicagoCensus, color = "grey", fill = "transparent")+
+  geom_point(aes(x = value, y = MAE), alpha = 0.4)+
+  geom_smooth(aes(x = value, y = MAE), method = "lm", se= FALSE)+
+  facet_wrap(~variable, scales = "free")+
+  labs(title="Errors as a function of socio-economic variables",
+       y="Mean Absolute Error (Trips)")+
+  plotTheme
