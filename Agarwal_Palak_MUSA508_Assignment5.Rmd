@@ -10,36 +10,117 @@ output:
     code_download: true
 ---
 
-## 1.1. Introduction
+## 1 Introduction
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-The San Francisco Municipal Transportation Agency (SFMTA) is a department of the City and County of San Francisco responsible for the management of all ground transportation in the city. The SFMTA has oversight over the Municipal Railway (Muni) public transit, as well as bicycling, paratransit, parking, traffic, walking, and taxis. In 2013 they partnered with public agencies to plan and implement the original Bay Area Bike Share pilot project and are now leading San Francisco’s efforts to work with the private sector partner to expand the system to over ten times its pilot size. They patnered with Lyft to expand the regional system which has since been re-branded with all-new equipment as Bay Wheels. In 2017, as independent stationless bikeshare emerged as a big new trend, we were among the first U.S. cities to create a regulatory and permitting framework to address this fast-moving phenomenon and insure that bikeshare in all its forms is safe, orderly and equitable for all San Franciscans.
+The San Francisco Municipal Transportation Agency (SFMTA) is a department of the City and County of San Francisco responsible for the management of all ground transportation in the city. The SFMTA has oversight over the Municipal Railway (Muni) public transit, as well as bicycling, paratransit, parking, traffic, walking, and taxis. In 2013 they partnered with public agencies to plan and implement the original Bay Area Bike Share pilot project and are now leading San Francisco’s efforts to work with the private sector partner to expand the system to over ten times its pilot size. They patnered with Lyft to expand the regional system which has since been re-branded with all-new equipment as Bay Wheels. In 2017, as independent stationless bikeshare emerged as a big new trend, they were among the first U.S. cities to create a regulatory and permitting framework to address this fast-moving phenomenon and insure that bikeshare in all its forms is safe, orderly and equitable for all San Franciscans.
 
-One of the big operational challenges of bike share systems is "re-balancing" - getting bikes to stations that are anticipated to have demand but lack bikes. Figuring out how to do this is one of the keys to operating a successful system. 
+One of the big operational challenges of bike share systems is "re-balancing" - getting bikes to stations that are anticipated to have demand but lack bikes. Figuring out how to do this is one of the keys to operating a successful system. With the introduction of the stationless bikeshare system the problem of re-balancing can be eliminated by a certain percentage. But it creates new problems as the bikes are further spread out and its harder to make sure that the bike is picked up. For the assignment, the data used is only from docked stations and does not include the stationless bikes.
 
-Here we will predict only the demand (ignoring the supply of bikes, network routing of rebalancing trucs etc.,), but it will give us a window into how we can use time-space predictive modeling to address an operations issue. If we knew the bike station capacities, we could see when demand for bikes might drive stations to run out of bikes, and then move excess bikes from elsewhere. A program manager for a bike-share system could reasonably anticipate demand and allocate bikes ahead of time.
+For making the bike-share system more efficient i.e. to re-balance it many strategies can be introduced. I think the most effect strategy would be to use a reward system. If we know the capacity of a bike station and knew that the user was going to that station we could incentivize them to drop off the bike to another bike station or we could also incentivize them to use a bike which has not been touched for more than a two weeks. This will allow for an efficient demand and supply system.
 
-The demand for parking spaces, uber trips, bike share, road access and a whole host of urban transportation phenomena are time and space dependent, and modeling them frequently involves simply controlling for the day, hour, location, weather and other temporal phenomena. Quite simply, the demand for bike share trips today at my location at 5PM is probably highly correlated with the demand last week at the same time. Predicting demand for bike share rides across Chicago is similar to predicting demand for ride-hailing services (which you will have done in class), except the stations are fixed.
+Today's trend is similar to the trend tomorrow and this week's trend will be similar to next week trends. Hence, we will be able to predict how many bikes and from which station to high accuracy as you will see in the later in the model and assignment. If we know how many bikes are going to be in use, it is easier to use that data to manipulate which bikes are being used and which are not. For example, the Financial District of downtown SF is very busy and has many stations in the same block. If for some reason one station is more active than the other, we can use rewards to make people pick and drop bikes from different stations. 
 
-The expectation with this tutorial is that you can work through it without running the code and instead focus on the discussion. The code itself is there if you want to try it out - but it's probably best left alone until you use it (and or similar code from the book) for the homework.
+Lyft using its platform and app to show the users where the bikes are available so that can be used to make users pick up bikes that have not been touched for a while and also have them drop it off to locations where the demand is high and there is a shortage of bikes. SFMTA already has concessions for different individuals and communities which the bike share system can tap into as well. 
 
-One important note - some of the `purrr` functions (such as `unnest`) vary from build to build, so you may get warning messages. As with everything open source, you may find versioning issues - if something doesn't work correctly, check the code in the textbook for rideshare prediction and swap some of that out instead.
+## 2.1 Setup
 
-You can also (if you choose) load an R Workspace which represents the output of all the code in the document. There is a link to that workspace on the class Piazza page in the Resources section.
+Let's load relevant libraries and some graphic themes.
+```{r setup, cache=TRUE, message=FALSE}
+## Setup
+library(tidyverse)
+library(sf)
+library(lubridate)
+library(tigris)
+library(tidycensus)
+library(viridis)
+library(riem)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(RSocrata)
 
-**Objectives**
+mapTheme <- function(base_size = 12) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = 24,colour = "black"),
+    plot.subtitle=element_text(face="italic"),
+    plot.caption=element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black", fill=NA, size=2)
+  )
+}
 
-**1. Discuss time-space trends in bike share data through exploratory analysis. What are the factors that affect whether somebody takes a bike share trip? How do we paramaterize and predict this?**
+plotTheme <- function(base_size = 12) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = 24,colour = "black"),
+    plot.subtitle = element_text(face="italic"),
+    plot.caption = element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    panel.grid.major = element_line("grey60", size = 0.1),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(colour = "black", fill=NA, size=2),
+    strip.background = element_rect(fill = "grey60", color = "white"),
+    strip.text = element_text(size=12),
+    axis.title = element_text(size=12),
+    axis.text = element_text(size=10),
+    plot.background = element_blank(),
+    legend.background = element_blank(),
+    legend.title = element_text(colour = "black", face = "italic"),
+    legend.text = element_text(colour = "black", face = "italic"),
+    strip.text.x = element_text(size = 14)
+  )
+}
 
-**2. Learn how to create panel (timeseries) data and time lag variables. Understand the structure of panel data.**
+# Load Quantile break functions
 
-**3. Create multiple models *at the same time* using `purrr` and a nested data structure.**
+qBr <- function(df, variable, rnd) {
+  if (missing(rnd)) {
+    as.character(quantile(round(df[[variable]],0),
+                          c(.01,.2,.4,.6,.8), na.rm=T))
+  } else if (rnd == FALSE | rnd == F) {
+    as.character(formatC(quantile(df[[variable]]), digits = 3),
+                 c(.01,.2,.4,.6,.8), na.rm=T)
+  }
+}
 
-**4. Evaluate models and their errors in time and space.**
+q5 <- function(variable) {as.factor(ntile(variable, 5))}
 
-## 2.1. Setup
+palette5 <- c("#eff3ff","#bdd7e7","#6baed6","#3182bd","#08519c")
+palette4 <- c("#D2FBD4","#92BCAB","#527D82","#123F5A")
+palette2 <- c("#6baed6","#08519c")
+```
 
-Let's load relevant libraries and some graphic themes. Note that my preference is to use `plotTheme` and `mapTheme` etc., as an object, not a function. This differs from Ken's routines.
+## 2.2 Data Wrangling
+
+```{r load_data, message = FALSE}
+## Read data
+sf_bike1 <- read.csv('Data/201803-fordgobike.csv')
+sf_bike2 <- read.csv('Data/201804-fordgobike.csv')
+
+sf_bike <- rbind(sf_bike1, sf_bike2)
+glimpse(sf_bike)
+
+sfCounty <-
+  st_read("https://data.sfgov.org/api/geospatial/p5b7-5n3h?method=export&format=GeoJSON") %>% 
+  st_union() %>%
+  st_transform('ESRI:102241')
+
+neighborhoods <- 
+  st_read("https://data.sfgov.org/api/geospatial/pty2-tcw4?method=export&format=GeoJSON") %>%
+  st_transform('ESRI:102241') %>%
+  dplyr::select(-link)
+```
+
+## 2.3 Census Data
+```{r census, message = FALSE}
