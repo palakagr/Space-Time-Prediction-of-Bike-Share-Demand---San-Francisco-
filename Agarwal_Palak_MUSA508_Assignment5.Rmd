@@ -1,0 +1,45 @@
+---
+title: "Space-Time Prediction of Bike Share Demand"
+author: "Palak Agarwal"
+date: "November 13, 2020"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: "hide"
+    code_download: true
+---
+
+## 1.1. Introduction
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The San Francisco Municipal Transportation Agency (SFMTA) is a department of the City and County of San Francisco responsible for the management of all ground transportation in the city. The SFMTA has oversight over the Municipal Railway (Muni) public transit, as well as bicycling, paratransit, parking, traffic, walking, and taxis. In 2013 they partnered with public agencies to plan and implement the original Bay Area Bike Share pilot project and are now leading San Francisco’s efforts to work with the private sector partner to expand the system to over ten times its pilot size. They patnered with Lyft to expand the regional system which has since been re-branded with all-new equipment as Bay Wheels. In 2017, as independent stationless bikeshare emerged as a big new trend, we were among the first U.S. cities to create a regulatory and permitting framework to address this fast-moving phenomenon and insure that bikeshare in all its forms is safe, orderly and equitable for all San Franciscans.
+
+One of the big operational challenges of bike share systems is "re-balancing" - getting bikes to stations that are anticipated to have demand but lack bikes. Figuring out how to do this is one of the keys to operating a successful system. 
+
+Here we will predict only the demand (ignoring the supply of bikes, network routing of rebalancing trucs etc.,), but it will give us a window into how we can use time-space predictive modeling to address an operations issue. If we knew the bike station capacities, we could see when demand for bikes might drive stations to run out of bikes, and then move excess bikes from elsewhere. A program manager for a bike-share system could reasonably anticipate demand and allocate bikes ahead of time.
+
+The demand for parking spaces, uber trips, bike share, road access and a whole host of urban transportation phenomena are time and space dependent, and modeling them frequently involves simply controlling for the day, hour, location, weather and other temporal phenomena. Quite simply, the demand for bike share trips today at my location at 5PM is probably highly correlated with the demand last week at the same time. Predicting demand for bike share rides across Chicago is similar to predicting demand for ride-hailing services (which you will have done in class), except the stations are fixed.
+
+The expectation with this tutorial is that you can work through it without running the code and instead focus on the discussion. The code itself is there if you want to try it out - but it's probably best left alone until you use it (and or similar code from the book) for the homework.
+
+One important note - some of the `purrr` functions (such as `unnest`) vary from build to build, so you may get warning messages. As with everything open source, you may find versioning issues - if something doesn't work correctly, check the code in the textbook for rideshare prediction and swap some of that out instead.
+
+You can also (if you choose) load an R Workspace which represents the output of all the code in the document. There is a link to that workspace on the class Piazza page in the Resources section.
+
+**Objectives**
+
+**1. Discuss time-space trends in bike share data through exploratory analysis. What are the factors that affect whether somebody takes a bike share trip? How do we paramaterize and predict this?**
+
+**2. Learn how to create panel (timeseries) data and time lag variables. Understand the structure of panel data.**
+
+**3. Create multiple models *at the same time* using `purrr` and a nested data structure.**
+
+**4. Evaluate models and their errors in time and space.**
+
+## 2.1. Setup
+
+Let's load relevant libraries and some graphic themes. Note that my preference is to use `plotTheme` and `mapTheme` etc., as an object, not a function. This differs from Ken's routines.
