@@ -26,8 +26,8 @@ Today's trend is similar to the trend tomorrow and this week's trend will be sim
 
 Lyft using its platform and app to show the users where the bikes are available so that can be used to make users pick up bikes that have not been touched for a while and also have them drop it off to locations where the demand is high and there is a shortage of bikes. SFMTA already has concessions for different individuals and communities which the bike share system can tap into as well. 
 
-## 2.1 Setup
-
+## 2.0 Setup
+### 2.1 Libraries and themes
 Let's load relevant libraries and some graphic themes.
 ```{r setup, cache=TRUE, message=FALSE}
 ## Setup
@@ -101,8 +101,8 @@ palette4 <- c("#D2FBD4","#92BCAB","#527D82","#123F5A")
 palette2 <- c("#6baed6","#08519c")
 ```
 
-## 2.2 Data Wrangling
-
+### 2.2 Data Wrangling
+Reading in the bike data.
 ```{r load_data, message = FALSE}
 ## Read data
 sf_bike1 <- read.csv('Data/201803-fordgobike.csv')
@@ -121,6 +121,55 @@ neighborhoods <-
   st_transform('ESRI:102241') %>%
   dplyr::select(-link)
 ```
+After that we use the data to create bins of 15 and 60 minute intervals by rounding.
+```{r time_bins, cache = TRUE}
+sfBike <- sf_bike %>%
+  mutate(interval60 = floor_date(ymd_hms(start_time), unit = "hour"),
+         interval15 = floor_date(ymd_hms(start_time), unit = "15 mins"),
+         week = week(interval60),
+         dotw = wday(interval60, label=TRUE)) %>%
+  filter(week < 15)
+```
 
-## 2.3 Census Data
+### 2.3 Census Data
 ```{r census, message = FALSE}
+# Install Census API Key
+census_api_key("aea3dee2d96acb5101e94f3dcfa1b575f73d093a", overwrite = TRUE)
+
+sfCensus <- 
+  get_acs(geography = "tract", 
+          variables = c("B01003_001", "B19013_001", 
+                        "B02001_002", "B08013_001",
+                        "B08012_001", "B08301_001", 
+                        "B08301_010", "B01002_001"), 
+          year = 2018, 
+          state = 06, 
+          geometry = TRUE, 
+          county=c(001,075,081,013,085),
+          output = "wide") %>%
+  rename(Total_Pop =  B01003_001E,
+         Med_Inc = B19013_001E,
+         Med_Age = B01002_001E,
+         White_Pop = B02001_002E,
+         Travel_Time = B08013_001E,
+         Num_Commuters = B08012_001E,
+         Means_of_Transport = B08301_001E,
+         Total_Public_Trans = B08301_010E) %>%
+  select(Total_Pop, Med_Inc, White_Pop, Travel_Time,
+         Means_of_Transport, Total_Public_Trans,
+         Med_Age,
+         GEOID, geometry) %>%
+  mutate(Percent_White = White_Pop / Total_Pop,
+         Mean_Commute_Time = Travel_Time / Total_Public_Trans,
+         Percent_Taking_Public_Trans = Total_Public_Trans / Means_of_Transport) %>%
+  st_transform('ESRI:102241')
+
+sfTracts <- 
+  sfCensus %>%
+  as.data.frame() %>%
+  distinct(GEOID, .keep_all = TRUE) %>%
+  select(GEOID, geometry) %>% 
+  st_sf
+```
+
+## 3
