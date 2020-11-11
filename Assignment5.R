@@ -504,7 +504,7 @@ library(gganimate)
 library(gifski)
 
 week11 <-
-  filter(sfBike_census , week == 11 & dotw == "Mon")
+  filter(sfBike_census , week == 11)
 
 week11.panel <-
   expand.grid(
@@ -520,20 +520,23 @@ ride.animation.data <-
   left_join(sfTracts, by=c("Pickup.Census.Tract" = "GEOID")) %>%
   st_sf() %>%
   mutate(Trips = case_when(Trip_Count == 0 ~ "0 trips",
-                           Trip_Count > 0 & Trip_Count <= 3 ~ "1-3 trips",
-                           Trip_Count > 3 & Trip_Count <= 6 ~ "4-6 trips",
-                           Trip_Count > 6 & Trip_Count <= 10 ~ "7-10 trips",
-                           Trip_Count > 10 ~ "11+ trips")) %>%
-  mutate(Trips  = fct_relevel(Trips, "0 trips","1-3 trips","4-6 trips",
-                              "7-10 trips","10+ trips"))
+                           Trip_Count > 0 & Trip_Count <= 30 ~ "1-30 trips",
+                           Trip_Count > 30 & Trip_Count <= 60 ~ "30-60 trips",
+                           Trip_Count > 60 & Trip_Count <= 90 ~ "60-90 trips",
+                           Trip_Count > 90 & Trip_Count <= 150 ~ "90-150 trips",
+                           Trip_Count > 150 ~ "150+ trips")) %>%
+  mutate(Trips  = fct_relevel(Trips, "0 trips","1-30 trips","30-60 trips",
+                              "60-90 trips","90-150 trips","150+ trips"))
 
 rideshare_animation <-
   ggplot() +
   geom_sf(data = ride.animation.data, aes(fill = Trips)) +
   scale_fill_manual(values = palette5) +
-  labs(title = "Rideshare pickups for one day in November 2018",
+  labs(title = "Rideshare pickups for one week in March 2018",
        subtitle = "15 minute intervals: {current_frame}") +
   transition_manual(interval15) +
   mapTheme()
 
 animate(rideshare_animation, duration=20, renderer = gifski_renderer())
+
+##
