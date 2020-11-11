@@ -140,7 +140,7 @@ glimpse(sfBike)
 sfBike_census <- st_join(sfBike %>% 
                         filter(is.na(start_station_longitude) == FALSE &
                                  is.na(start_station_latitude) == FALSE &
-                                 is.na(end_station_latitude) == FALSE &
+                                 is.na(end_station_latitude) == FALSE  &
                                  is.na(end_station_longitude) == FALSE) %>%
                         st_as_sf(., coords = c("start_station_longitude", "start_station_latitude"), crs = 4326),
                       sfTracts %>%
@@ -497,3 +497,43 @@ week_predictions %>%
        y="Mean Absolute Error (Trips)")+
   plotTheme
 
+
+## Animation
+
+library(gganimate)
+library(gifski)
+
+week11 <-
+  filter(sfBike_census , week == 11 & dotw == "Mon")
+
+week11.panel <-
+  expand.grid(
+    interval15 = unique(week11$interval15),
+    Pickup.Census.Tract = unique(sfBike_census$Origin.Tract))
+
+ride.animation.data <-
+  mutate(week11, Trip_Counter = 1) %>%
+  right_join(week11.panel) %>% 
+  group_by(interval15, Pickup.Census.Tract) %>%
+  summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>% 
+  ungroup() %>% 
+  left_join(sfTracts, by=c("Pickup.Census.Tract" = "GEOID")) %>%
+  st_sf() %>%
+  mutate(Trips = case_when(Trip_Count == 0 ~ "0 trips",
+                           Trip_Count > 0 & Trip_Count <= 3 ~ "1-3 trips",
+                           Trip_Count > 3 & Trip_Count <= 6 ~ "4-6 trips",
+                           Trip_Count > 6 & Trip_Count <= 10 ~ "7-10 trips",
+                           Trip_Count > 10 ~ "11+ trips")) %>%
+  mutate(Trips  = fct_relevel(Trips, "0 trips","1-3 trips","4-6 trips",
+                              "7-10 trips","10+ trips"))
+
+rideshare_animation <-
+  ggplot() +
+  geom_sf(data = ride.animation.data, aes(fill = Trips)) +
+  scale_fill_manual(values = palette5) +
+  labs(title = "Rideshare pickups for one day in November 2018",
+       subtitle = "15 minute intervals: {current_frame}") +
+  transition_manual(interval15) +
+  mapTheme()
+
+animate(rideshare_animation, duration=20, renderer = gifski_renderer())
