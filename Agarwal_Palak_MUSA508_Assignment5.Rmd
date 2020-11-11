@@ -172,4 +172,33 @@ sfTracts <-
   st_sf
 ```
 
-## 3
+## 2.4 Connect census data to the the Bikeshare data
+Now lets add the spatial information to our bikeshare data as origin and destination data, first joining the origin station, then the destination station to our census data.
+```{r add_census_tracts, cache = TRUE, message = FALSE, warning = FALSE}
+## Adding census data to bike data
+sfBike_census <- st_join(sfBike %>% 
+                        filter(is.na(start_station_longitude) == FALSE &
+                                 is.na(start_station_latitude) == FALSE &
+                                 is.na(end_station_latitude) == FALSE &
+                                 is.na(end_station_longitude) == FALSE) %>%
+                        st_as_sf(., coords = c("start_station_longitude", "start_station_latitude"), crs = 4326),
+                      sfTracts %>%
+                        st_transform(crs=4326),
+                      join=st_intersects,
+                          left = TRUE) %>%
+  rename(Origin.Tract = GEOID) %>%
+  mutate(start_station_longitude = unlist(map(geometry, 1)),
+         start_station_latitude = unlist(map(geometry, 2)))%>%
+  as.data.frame() %>%
+  select(-geometry)%>%
+  st_as_sf(., coords = c("end_station_longitude", "end_station_latitude"), crs = 4326) %>%
+  st_join(., sfTracts %>%
+            st_transform(crs=4326),
+          join=st_intersects,
+          left = TRUE) %>%
+  rename(Destination.Tract = GEOID)  %>%
+  mutate(end_station_longitude = unlist(map(geometry, 1)),
+         end_station_latitude = unlist(map(geometry, 2)))%>%
+  as.data.frame() %>%
+  select(-geometry)
+```
