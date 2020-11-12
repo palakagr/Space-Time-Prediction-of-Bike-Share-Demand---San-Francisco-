@@ -400,6 +400,29 @@ ride.panel <-
   mutate(
     tourist_dist = nn_function(st_coordinates(ride.panel), st_coordinates(tourist_spots), 1))
 
+## Making the new features categorical 
+ride.panel <-
+  ride.panel %>%
+  mutate(Park = case_when(
+    park_dist > 0 & park_dist <= 500 ~ "Close",
+    park_dist > 500 & park_dist <= 1000 ~ "Moderate",
+    park_dist > 1000 ~ "Far"))
+
+ride.panel <-
+  ride.panel %>%
+  mutate(Station = case_when(
+    station_dist > 0 & station_dist <= 500 ~ "Close",
+    station_dist > 500 & station_dist <= 1000 ~ "Moderate",
+    station_dist > 1000 ~ "Far"))
+
+ride.panel <-
+  ride.panel %>%
+  mutate(Tourist = case_when(
+    tourist_dist > 0 & tourist_dist <= 500 ~ "Close",
+    tourist_dist > 500 & tourist_dist <= 1000 ~ "Moderate",
+    tourist_dist > 1000 ~ "Far"))
+
+
 ## Testing
 as.data.frame(ride.panel) %>%
   group_by(interval60) %>% 
@@ -432,7 +455,7 @@ reg4 <-
 
 reg5 <- 
   lm(Trip_Count ~  start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
-       lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day + park_dist + station_dist + tourist_dist, 
+       lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day + Park + Station + Tourist, 
      data=ride.Train)
 
 ## Predicting 
@@ -449,7 +472,7 @@ week_predictions <-
          BSpace_FE = map(.x = data, fit = reg2, .f = model_pred),
          CTime_Space_FE = map(.x = data, fit = reg3, .f = model_pred),
          DTime_Space_FE_timeLags = map(.x = data, fit = reg4, .f = model_pred),
-         ETime_Space_FE_timeLags_Features = map(.x = data, fit = reg4, .f = model_pred)) %>% 
+         ETime_Space_FE_timeLags_Features = map(.x = data, fit = reg5, .f = model_pred)) %>% 
   gather(Regression, Prediction, -data, -week) %>%
   mutate(Observed = map(data, pull, Trip_Count),
          Absolute_Error = map2(Observed, Prediction,  ~ abs(.x - .y)),
@@ -458,6 +481,7 @@ week_predictions <-
 
 week_predictions
 
+## Bar plot
 week_predictions %>%
   dplyr::select(week, Regression, MAE) %>%
   gather(Variable, MAE, -Regression, -week) %>%
@@ -466,7 +490,7 @@ week_predictions %>%
   scale_fill_manual(values = palette5) +
   labs(title = "Mean Absolute Errors by model specification and week") +
   plotTheme()
-
+## Graph
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
          start_station_id = map(data, pull, start_station_id)) %>%
