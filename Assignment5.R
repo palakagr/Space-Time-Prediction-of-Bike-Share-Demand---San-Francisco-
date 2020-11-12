@@ -10,6 +10,7 @@ library(gridExtra)
 library(knitr)
 library(kableExtra)
 library(RSocrata)
+library(FNN)
 
 mapTheme <- function(base_size = 12) {
   theme(
@@ -68,6 +69,26 @@ palette5 <- c("#eff3ff","#bdd7e7","#6baed6","#3182bd","#08519c")
 palette4 <- c("#D2FBD4","#92BCAB","#527D82","#123F5A")
 palette2 <- c("#6baed6","#08519c")
 
+# Functions
+nn_function <- function(measureFrom,measureTo,k) {
+  measureFrom_Matrix <- as.matrix(measureFrom)
+  measureTo_Matrix <- as.matrix(measureTo)
+  nn <-   
+    get.knnx(measureTo, measureFrom, k)$nn.dist
+  output <-
+    as.data.frame(nn) %>%
+    rownames_to_column(var = "thisPoint") %>%
+    gather(points, point_distance, V1:ncol(.)) %>%
+    arrange(as.numeric(thisPoint)) %>%
+    group_by(thisPoint) %>%
+    summarize(pointDistance = mean(point_distance)) %>%
+    arrange(as.numeric(thisPoint)) %>% 
+    dplyr::select(-thisPoint) %>%
+    pull()
+  
+  return(output)  
+}
+
 ## Read data
 sf_bike1 <- read.csv('Data/201803-fordgobike.csv')
 sf_bike2 <- read.csv('Data/201804-fordgobike.csv')
@@ -97,7 +118,7 @@ sfCensus <-
           year = 2018, 
           state = 06, 
           geometry = TRUE, 
-          county=c(001,075,081,013,085),
+          county=c(001,075),
           output = "wide") %>%
   rename(Total_Pop =  B01003_001E,
          Med_Inc = B19013_001E,
@@ -161,6 +182,7 @@ sfBike_census <- st_join(sfBike %>%
   mutate(end_station_longitude = unlist(map(geometry, 1)),
          end_station_latitude = unlist(map(geometry, 2)))%>%
   as.data.frame() %>%
+  na.omit(Origin.Tract, Destination.Tract)
   select(-geometry)
 
 ## Weather Data
@@ -200,6 +222,7 @@ ggplot(sfBike_census %>%
        y="Number of trips")+
   plotTheme()
 
+## Mean number of hourly trips
 sfBike_census %>%
   mutate(time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
                                  hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
@@ -211,42 +234,44 @@ sfBike_census %>%
   summarize(mean_trips = mean(n))%>%
   ggplot()+
   geom_histogram(aes(mean_trips), binwidth = 1)+
-  labs(title="Mean Number of Hourly Trips Per Station. SF, March-April, 2018",
+  labs(title="Mean Number of Hourly Trips Per Station. SF+Alameda, March-April, 2018",
        x="Number of trips", 
        y="Frequency")+
   facet_wrap(~time_of_day)+
   plotTheme()
 
+## By station
 ggplot(sfBike_census %>%
          group_by(interval60, start_station_name) %>%
          tally())+
   geom_histogram(aes(n), binwidth = 5)+
-  labs(title="Bike share trips per hr by station. SF, March-April, 2018",
-       x="Trip Counts", 
-       y="Number of Stations")+
+  labs(title="Bike share trips per hr by station. SF+Alameda, March-April, 2018",
+       x="Number of Stations", 
+       y="Trip Counts")+
   plotTheme()
 
-
+## Number of trips by hr in a week
 ggplot(sfBike_census %>% mutate(hour = hour(start_time)))+
   geom_freqpoly(aes(hour, color = dotw), binwidth = 1)+
-  labs(title="Bike share trips in Chicago, by day of the week, May, 2018",
+  labs(title="Bike share trips by day of the week, SF+Alameda, March-April, 2018",
        x="Hour", 
        y="Trip Counts")+
   plotTheme()
 
-
+## Number of trips weekday - weekend
 ggplot(sfBike_census %>% 
          mutate(hour = hour(start_time),
                 weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday")))+
   geom_freqpoly(aes(hour, color = weekend), binwidth = 1)+
-  labs(title="Bike share trips in Chicago - weekend vs weekday, May, 2018",
+  labs(title="Bike share trips - weekend vs weekday, SF+Alameda, March-April, 2018",
        x="Hour", 
        y="Trip Counts")+
   plotTheme()
 
+## Rush by station on census tracts
 ggplot()+
   geom_sf(data = sfTracts %>%
-            st_transform(crs=4326))+
+            st_transform(crs=4326), colour = '#efefef')+
   geom_point(data = sfBike_census %>% 
                mutate(hour = hour(start_time),
                       weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
@@ -257,7 +282,7 @@ ggplot()+
                group_by(start_station_id, start_station_latitude, start_station_longitude, weekend, time_of_day) %>%
                tally(),
              aes(x=start_station_longitude, y = start_station_latitude, color = n), 
-             fill = "transparent", alpha = 0.4, size = 0.3)+
+             fill = "transparent", alpha = 0.4, size = 1.5)+
   scale_colour_viridis(direction = -1,
                        discrete = FALSE, option = "D")+
   ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
@@ -311,6 +336,71 @@ ride.panel <-
          lag1day = dplyr::lag(Trip_Count,24)) %>%
   mutate(day = yday(interval60))
 
+ride.panel <-
+  ride.panel %>%
+  st_as_sf(coords = c("start_station_longitude", "start_station_latitude"), crs = 4326, agr = "constant") %>%
+  st_transform('ESRI:102241')
+  
+##Exposure Features 
+
+### Parks
+parks_al <- 
+  read.socrata("https://data.oaklandca.gov/resource/kq8i-6bzk.json") %>%
+  dplyr::select(Y = location_1.latitude, X = location_1.longitude) %>%
+  na.omit() %>%
+  st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+  st_transform('ESRI:102241') %>%
+  mutate(Legend = "Park")
+
+parks_sf <-
+  st_read("C:/Users/agarw/Documents/MUSA508/MUSA508-Assignment3/Data/Recreation_and_Parks_Properties.csv") %>%
+  dplyr::select(Y = Latitude, X = Longitude) %>%
+  na.omit() %>%
+  st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+  st_transform('ESRI:102241') %>%
+  mutate(Legend = "Park")
+
+parks <- rbind(parks_al, parks_sf)
+
+ride.panel <-
+  ride.panel %>% 
+  mutate(
+    park_dist = nn_function(st_coordinates(ride.panel), st_coordinates(parks), 1))
+
+## Distance to transit stop 
+sfo <- read.csv('C:/Users/agarw/Documents/MUSA508/MUSA-508-Assignment-1/Data/final_sfo_lines.csv')
+x <- vector(mode='list', length = 105)
+y <- vector(mode='list', length = 105)
+spli <- strsplit(sfo$Location, ",")
+for (val in spli){
+  x <- append(x, val[[1]])
+  y <- append(y, val[[2]])
+  
+}
+sfo_new <- 
+  sfo %>%
+  mutate(X = x[106:210],
+         Y = y[106:210]) %>%
+  dplyr::select(-Abbreviation, -Location, -Description)%>%
+  st_as_sf(coords = c("X","Y"), crs = 4326, agr = "constant") %>%
+  st_transform('ESRI:102241') %>%
+  mutate(Legend = "Station")
+
+ride.panel <-
+  ride.panel %>% 
+  mutate(
+    station_dist = nn_function(st_coordinates(ride.panel), st_coordinates(sfo_new), 1))
+
+## Tourist spots
+tourist_spots <- st_read('Data/attraction_point.geojson') %>%
+  st_transform('ESRI:102241')
+
+ride.panel <-
+  ride.panel %>% 
+  mutate(
+    tourist_dist = nn_function(st_coordinates(ride.panel), st_coordinates(tourist_spots), 1))
+
+## Testing
 as.data.frame(ride.panel) %>%
   group_by(interval60) %>% 
   summarise_at(vars(starts_with("lag"), "Trip_Count"), mean, na.rm = TRUE) %>%
@@ -340,6 +430,10 @@ reg4 <-
        lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day, 
      data=ride.Train)
 
+reg5 <- 
+  lm(Trip_Count ~  start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
+       lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day + park_dist + station_dist + tourist_dist, 
+     data=ride.Train)
 
 ## Predicting 
 ride.Test.weekNest <- 
@@ -354,7 +448,8 @@ week_predictions <-
   mutate(ATime_FE = map(.x = data, fit = reg1, .f = model_pred),
          BSpace_FE = map(.x = data, fit = reg2, .f = model_pred),
          CTime_Space_FE = map(.x = data, fit = reg3, .f = model_pred),
-         DTime_Space_FE_timeLags = map(.x = data, fit = reg4, .f = model_pred)) %>% 
+         DTime_Space_FE_timeLags = map(.x = data, fit = reg4, .f = model_pred),
+         ETime_Space_FE_timeLags_Features = map(.x = data, fit = reg4, .f = model_pred)) %>% 
   gather(Regression, Prediction, -data, -week) %>%
   mutate(Observed = map(data, pull, Trip_Count),
          Absolute_Error = map2(Observed, Prediction,  ~ abs(.x - .y)),
@@ -509,7 +604,7 @@ week11 <-
 week11.panel <-
   expand.grid(
     interval15 = unique(week11$interval15),
-    Pickup.Census.Tract = unique(sfBike_census$Origin.Tract))
+    Pickup.Census.Tract = unique(sfBike_census$start_station_id))
 
 ride.animation.data <-
   mutate(week11, Trip_Counter = 1) %>%
