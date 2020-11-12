@@ -182,11 +182,11 @@ glimpse(weather.Panel)
 
 grid.arrange(
   ggplot(weather.Panel, aes(interval60,Precipitation)) + geom_line() + 
-    labs(title="Percipitation", x="Hour", y="Perecipitation") + plotTheme,
+    labs(title="Percipitation", x="Hour", y="Perecipitation") + plotTheme(),
   ggplot(weather.Panel, aes(interval60,Wind_Speed)) + geom_line() + 
-    labs(title="Wind Speed", x="Hour", y="Wind Speed") + plotTheme,
+    labs(title="Wind Speed", x="Hour", y="Wind Speed") + plotTheme(),
   ggplot(weather.Panel, aes(interval60,Temperature)) + geom_line() + 
-    labs(title="Temperature", x="Hour", y="Temperature") + plotTheme,
+    labs(title="Temperature", x="Hour", y="Temperature") + plotTheme(),
   top="Weather Data - San Francisco SFO - March-April, 2018")
 
 ## Exploratory analysis 
@@ -198,7 +198,7 @@ ggplot(sfBike_census %>%
   labs(title="Bike share trips per hr. Bay Area, March, 2018",
        x="Date", 
        y="Number of trips")+
-  plotTheme
+  plotTheme()
 
 sfBike_census %>%
   mutate(time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
@@ -215,7 +215,7 @@ sfBike_census %>%
        x="Number of trips", 
        y="Frequency")+
   facet_wrap(~time_of_day)+
-  plotTheme
+  plotTheme()
 
 ggplot(sfBike_census %>%
          group_by(interval60, start_station_name) %>%
@@ -224,7 +224,7 @@ ggplot(sfBike_census %>%
   labs(title="Bike share trips per hr by station. SF, March-April, 2018",
        x="Trip Counts", 
        y="Number of Stations")+
-  plotTheme
+  plotTheme()
 
 
 ggplot(sfBike_census %>% mutate(hour = hour(start_time)))+
@@ -232,7 +232,7 @@ ggplot(sfBike_census %>% mutate(hour = hour(start_time)))+
   labs(title="Bike share trips in Chicago, by day of the week, May, 2018",
        x="Hour", 
        y="Trip Counts")+
-  plotTheme
+  plotTheme()
 
 
 ggplot(sfBike_census %>% 
@@ -242,7 +242,7 @@ ggplot(sfBike_census %>%
   labs(title="Bike share trips in Chicago - weekend vs weekday, May, 2018",
        x="Hour", 
        y="Trip Counts")+
-  plotTheme
+  plotTheme()
 
 ggplot()+
   geom_sf(data = sfTracts %>%
@@ -264,7 +264,7 @@ ggplot()+
   xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
   facet_grid(weekend ~ time_of_day)+
   labs(title="Bike share trips per hr by station. Chicago, May, 2018")+
-  mapTheme
+  mapTheme()
 
 ## Space-time series
 length(unique(sfBike_census$interval60)) * length(unique(sfBike_census$start_station_id))
@@ -370,7 +370,7 @@ week_predictions %>%
   geom_bar(aes(fill = Regression), position = "dodge", stat="identity") +
   scale_fill_manual(values = palette5) +
   labs(title = "Mean Absolute Errors by model specification and week") +
-  plotTheme
+  plotTheme()
 
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
@@ -384,7 +384,7 @@ week_predictions %>%
   geom_line(size = 1.1) + 
   facet_wrap(~Regression, ncol=1) +
   labs(title = "Predicted/Observed bike share time series", subtitle = "Chicago; A test set of 2 weeks",  x = "Hour", y= "Station Trips") +
-  plotTheme
+  plotTheme()
 
 
 week_predictions %>% 
@@ -406,7 +406,7 @@ week_predictions %>%
   ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
   xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
   labs(title="Mean Abs Error, Test Set, Model 4")+
-  mapTheme
+  mapTheme()
 
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
@@ -432,7 +432,7 @@ week_predictions %>%
   labs(title="Observed vs Predicted",
        x="Observed trips", 
        y="Predicted trips")+
-  plotTheme
+  plotTheme()
 
 
 week_predictions %>% 
@@ -463,7 +463,7 @@ week_predictions %>%
   xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
   facet_grid(weekend~time_of_day)+
   labs(title="Mean Absolute Errors, Test Set")+
-  mapTheme
+  mapTheme()
 
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
@@ -495,7 +495,7 @@ week_predictions %>%
   facet_wrap(~variable, scales = "free")+
   labs(title="Errors as a function of socio-economic variables",
        y="Mean Absolute Error (Trips)")+
-  plotTheme
+  plotTheme()
 
 
 ## Animation
@@ -539,4 +539,20 @@ rideshare_animation <-
 
 animate(rideshare_animation, duration=20, renderer = gifski_renderer())
 
-##
+## Cross validation
+library(caret)
+fitControl <- trainControl(method = "cv", 
+                           number = 100,
+                           savePredictions = TRUE)
+
+# for k-folds CV
+
+reg.cv <-  
+  train(Trip_Count ~ . , data = st_drop_geometry(ride.panel) %>% 
+          dplyr::select(start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
+          lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day),  
+        method = "lm",  
+        trControl = fitControl,  
+        na.action = na.pass)
+
+reg.cv
