@@ -251,7 +251,7 @@ grid.arrange(
   top="Weather Data - San Francisco SFO - March-April, 2018")
 ```
 
-## 3.1. Data Exploration
+## 3 Data Exploration
 
 We begin by examining the time and frequency components of our data.
 
@@ -266,3 +266,341 @@ ggplot(sfBike_census %>%
        y="Number of trips")+
   plotTheme()
 ```
+
+```{r plot2, message = FALSE, warning = FALSE, cache = TRUE}
+## Mean number of hourly trips
+sfBike_census %>%
+  mutate(time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush"))%>%
+  group_by(interval60, start_station_name, time_of_day) %>%
+  tally()%>%
+  group_by(start_station_name, time_of_day)%>%
+  summarize(mean_trips = mean(n))%>%
+  ggplot()+
+  geom_histogram(aes(mean_trips), binwidth = 1)+
+  labs(title="Mean Number of Hourly Trips Per Station. SF+Alameda, March-April, 2018",
+       x="Number of trips", 
+       y="Frequency")+
+  facet_wrap(~time_of_day)+
+  plotTheme()
+```
+
+```{r plot3, message = FALSE, warning = FALSE, cache = TRUE}
+## By station
+ggplot(sfBike_census %>%
+         group_by(interval60, start_station_name) %>%
+         tally())+
+  geom_histogram(aes(n), binwidth = 5)+
+  labs(title="Bike share trips per hr by station. SF+Alameda, March-April, 2018",
+       x="Number of Stations", 
+       y="Trip Counts")+
+  plotTheme()
+```
+
+```{r plot4, message = FALSE, warning = FALSE, cache = TRUE}
+## Number of trips by hr in a week
+ggplot(sfBike_census %>% mutate(hour = hour(start_time)))+
+  geom_freqpoly(aes(hour, color = dotw), binwidth = 1)+
+  labs(title="Bike share trips by day of the week, SF+Alameda, March-April, 2018",
+       x="Hour", 
+       y="Trip Counts")+
+  plotTheme()
+```
+
+```{r plot5, message = FALSE, warning = FALSE, cache = TRUE}
+## Number of trips weekday - weekend
+ggplot(sfBike_census %>% 
+         mutate(hour = hour(start_time),
+                weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday")))+
+  geom_freqpoly(aes(hour, color = weekend), binwidth = 1)+
+  labs(title="Bike share trips - weekend vs weekday, SF+Alameda, March-April, 2018",
+       x="Hour", 
+       y="Trip Counts")+
+  plotTheme()
+```
+
+
+```{r plot6, message = FALSE, warning = FALSE, cache = TRUE}
+## Rush by station on census tracts
+ggplot()+
+  geom_sf(data = sfTracts %>%
+            st_transform(crs=4326), colour = '#efefef')+
+  geom_point(data = sfBike_census %>% 
+               mutate(hour = hour(start_time),
+                      weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+                      time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                              hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                              hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                              hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush"))%>%
+               group_by(start_station_id, start_station_latitude, start_station_longitude, weekend, time_of_day) %>%
+               tally(),
+             aes(x=start_station_longitude, y = start_station_latitude, color = n), 
+             fill = "transparent", alpha = 0.4, size = 1.5)+
+  scale_colour_viridis(direction = -1,
+                       discrete = FALSE, option = "D")+
+  ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
+  xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
+  facet_grid(weekend ~ time_of_day)+
+  labs(title="Bike share trips per hr by station. Chicago, May, 2018")+
+  mapTheme()
+```
+
+## 4 Create Space-Time Panel
+
+First **we have to make sure each unique station and hour/day combo exists in our data set.** This is done in order to create a "panel" (e.g. a time-series) data set where each time period in the study is represented by a row - whether an observation took place then or not. So if a station didn't have any trips originating from it at a given hour, we still need a zero in that spot in the panel.
+
+We start by determining the maximum number of combinations.
+
+Then we compare that to the actual number of combinations. We create an empty data frame `study.panel`, is created that has each unique space/time observations. This is done using the expand.grid function and unique. Along the way, we keep tabs on the number of rows our data have - `nrow` shows that the count is still correct.
+
+We then join the station name, tract and lat/lon (some have multiple lat lon info, so we just take the first one of each using `group_by` and `slice`).
+We create the full panel by summarizing counts by station for each time interval, keep census info and lat/lon information along for joining later to other data. We remove data for station IDs that are `FALSE`.
+
+We also ditch a bit of data (this is why `study.panel` and `ride.panel` don't end up being exactly the same length). There are two stations - Dusable harbor and Eastlake Terrace that don't join properly to census tracts. They are too close to the water and don't play nice with our tracts. In the service of laziness, we get rid of these.
+
+```{r panel_length_check, cache = TRUE, message = FALSE, warning = FALSE}
+length(unique(sfBike_census$interval60)) * length(unique(sfBike_census$start_station_id))
+
+study.panel <- 
+  expand.grid(interval60=unique(sfBike_census$interval60), 
+              start_station_id = unique(sfBike_census$start_station_id)) %>%
+  left_join(., sfBike_census %>%
+              select(start_station_id, start_station_name, Origin.Tract, start_station_longitude, start_station_latitude )%>%
+              distinct() %>%
+              group_by(start_station_id) %>%
+              slice(1))
+
+nrow(study.panel)      
+
+## Ride Panel
+ride.panel <- 
+  sfBike_census %>%
+  mutate(Trip_Counter = 1) %>%
+  right_join(study.panel) %>% 
+  group_by(interval60, start_station_id, start_station_name, Origin.Tract, start_station_longitude, start_station_latitude) %>%
+  summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>%
+  left_join(weather.Panel) %>%
+  ungroup() %>%
+  filter(is.na(start_station_id) == FALSE) %>%
+  mutate(week = week(interval60),
+         dotw = wday(interval60, label = TRUE)) %>%
+  filter(is.na(Origin.Tract) == FALSE)
+
+ride.panel <- 
+  left_join(ride.panel, sfCensus %>%
+              as.data.frame() %>%
+              select(-geometry), by = c("Origin.Tract" = "GEOID"))
+```
+
+## 5 Feature Engineering
+
+### 5.1 Time Lags
+
+Creating time lag variables will add additional nuance about the demand during a given time period - hours before and during that day. 
+
+We can also try to control for the effects of holidays that disrupt the expected demand during a given weekend or weekday. We have a holiday on May 28 - Memorial Day. For that three day weekend we could use some dummy variables indicating temporal proximity to the holiday.
+
+Keep in mind, that unique fixed effects must be in your training set when you run your models.
+
+We can evaluate the correlations in these lags. They are pretty strong. There's a Pearson's R of 0.84 for the `lagHour` - that's very, very strong. 
+
+This makes a lot of intuitive sense - the demand right now should be relatively similar to the demand tomorrow at this time, and to the demand an hour from now, but twelve hours from now, we likely expect the opposite in terms of demand.
+
+```{r time_lags, cache = TRUE, message = FALSE}
+ride.panel <- 
+  ride.panel %>% 
+  arrange(start_station_id, interval60) %>% 
+  mutate(lagHour = dplyr::lag(Trip_Count,1),
+         lag2Hours = dplyr::lag(Trip_Count,2),
+         lag3Hours = dplyr::lag(Trip_Count,3),
+         lag4Hours = dplyr::lag(Trip_Count,4),
+         lag12Hours = dplyr::lag(Trip_Count,12),
+         lag1day = dplyr::lag(Trip_Count,24)) %>%
+  mutate(day = yday(interval60))
+
+ride.panel <-
+  ride.panel %>%
+  mutate(X = start_station_longitude, Y = start_station_latitude )%>%
+  st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+  st_transform('ESRI:102241')
+```
+
+```{r evaluate_lags, cache = TRUE, warning = FALSE, message = FALSE}
+as.data.frame(ride.panel) %>%
+  group_by(interval60) %>% 
+  summarise_at(vars(starts_with("lag"), "Trip_Count"), mean, na.rm = TRUE) %>%
+  gather(Variable, Value, -interval60, -Trip_Count) %>%
+  mutate(Variable = factor(Variable, levels=c("lagHour","lag2Hours","lag3Hours","lag4Hours",
+                                              "lag12Hours","lag1day")))%>%
+  group_by(Variable) %>%  
+  summarize(correlation = round(cor(Value, Trip_Count),2))
+```
+
+
+### 5.2 Exposure Features
+```{r exposure, cache = TRUE, message = FALSE}
+##Exposure Features 
+
+### Parks
+parks_al <- 
+  read.socrata("https://data.oaklandca.gov/resource/kq8i-6bzk.json") %>%
+  dplyr::select(Y = location_1.latitude, X = location_1.longitude) %>%
+  na.omit() %>%
+  st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+  st_transform('ESRI:102241') %>%
+  mutate(Legend = "Park")
+
+parks_sf <-
+  st_read("C:/Users/agarw/Documents/MUSA508/MUSA508-Assignment3/Data/Recreation_and_Parks_Properties.csv") %>%
+  dplyr::select(Y = Latitude, X = Longitude) %>%
+  na.omit() %>%
+  st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
+  st_transform('ESRI:102241') %>%
+  mutate(Legend = "Park")
+
+parks <- rbind(parks_al, parks_sf)
+
+ride.panel <-
+  ride.panel %>% 
+  mutate(
+    park_dist = nn_function(st_coordinates(ride.panel), st_coordinates(parks), 1))
+
+## Distance to transit stop 
+sfo <- read.csv('C:/Users/agarw/Documents/MUSA508/MUSA-508-Assignment-1/Data/final_sfo_lines.csv')
+x <- vector(mode='list', length = 105)
+y <- vector(mode='list', length = 105)
+spli <- strsplit(sfo$Location, ",")
+for (val in spli){
+  x <- append(x, val[[1]])
+  y <- append(y, val[[2]])
+  
+}
+sfo_new <- 
+  sfo %>%
+  mutate(X = x[106:210],
+         Y = y[106:210]) %>%
+  dplyr::select(-Abbreviation, -Location, -Description)%>%
+  st_as_sf(coords = c("X","Y"), crs = 4326, agr = "constant") %>%
+  st_transform('ESRI:102241') %>%
+  mutate(Legend = "Station")
+
+ride.panel <-
+  ride.panel %>% 
+  mutate(
+    station_dist = nn_function(st_coordinates(ride.panel), st_coordinates(sfo_new), 1))
+
+## Tourist spots
+tourist_spots <- st_read('Data/attraction_point.geojson') %>%
+  st_transform('ESRI:102241')
+
+ride.panel <-
+  ride.panel %>% 
+  mutate(
+    tourist_dist = nn_function(st_coordinates(ride.panel), st_coordinates(tourist_spots), 1))
+
+## Making the new features categorical 
+ride.panel <-
+  ride.panel %>%
+  mutate(Park = case_when(
+    park_dist > 0 & park_dist <= 500 ~ "Close",
+    park_dist > 500 & park_dist <= 1000 ~ "Moderate",
+    park_dist > 1000 ~ "Far"))
+
+ride.panel <-
+  ride.panel %>%
+  mutate(Station = case_when(
+    station_dist > 0 & station_dist <= 500 ~ "Close",
+    station_dist > 500 & station_dist <= 1000 ~ "Moderate",
+    station_dist > 1000 ~ "Far"))
+
+ride.panel <-
+  ride.panel %>%
+  mutate(Tourist = case_when(
+    tourist_dist > 0 & tourist_dist <= 500 ~ "Close",
+    tourist_dist > 500 & tourist_dist <= 1000 ~ "Moderate",
+    tourist_dist > 1000 ~ "Far"))
+```
+
+## 6.1 Linear Regressions
+
+We split our data into a training and a test set. We create five linear models using the `lm` funtion. Sometimes, for data such as these, Poisson distributions, designed for modeling counts, might be appropriate. I'll spare you the effort - linear models work better with this particular data set. 
+
+We create the models using our training data `ride.Train`. The first models include only temporal controls, but the later ones contain all of our lag information.
+
+Notice that we are using a partition that is user specified and is time dependent. 
+
+**Why are we splitting our data by time and not randomly??**
+
+**Why are we using the end of the month to predict for the beginning of the month?**
+
+Be aware that these models may run quite slowly depending on how large your data set is and how many variables you decide to include.
+
+```{r train_test, cache = TRUE}
+## Regression
+ride.Train <- filter(ride.panel, week <= 12)
+ride.Test <- filter(ride.panel, week > 12)
+
+### 5 regressions
+reg1 <- 
+  lm(Trip_Count ~  hour(interval60) + dotw + Temperature,  data=ride.Train)
+
+reg2 <- 
+  lm(Trip_Count ~  start_station_name + dotw + Temperature,  data=ride.Train)
+
+reg3 <- 
+  lm(Trip_Count ~  start_station_name + hour(interval60) + dotw + Temperature + Precipitation, 
+     data=ride.Train)
+
+reg4 <- 
+  lm(Trip_Count ~  start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
+       lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day, 
+     data=ride.Train)
+
+reg5 <- 
+  lm(Trip_Count ~  start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
+       lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day + Park + Station + Tourist, 
+     data=ride.Train)
+```
+
+## 6.2 Predict for test data
+
+When your models have finished running, create a nested data frame of test data by week. Nested data is common in most other programming languages. For instance, the javascript object notation file format (aka JSON) is highly nested.
+
+Nesting means that instead of merely having a "flat" file consisting of rows and columns, you have a matrix of other objects - imagine each cell in a matrix containing another matrix within it, or a list, or a list of lists. 
+
+The `purrr` package is designed to `map` functions through nested data structures. This concept is important - think of `map` as visiting each dataframe in a nested data set and applies a function to it.
+
+We create a function called `model_pred` which we can then `map` onto each data frame in our nested structure.
+
+This function is called in the code below in a few ways, one way is like so: `map(.x = data, fit = name_of_your_regression, .f = model_pred)`. Here's the important bit - the argument `fit` takes the name of a regression you have created that you want to use to make predictions, and the `.f` argument takes a function, in this case `model_pred`, which we create in order to simply execute the `predict` function.
+
+You don't need to manipulate anything else in this code block other than the `fit` argument.
+
+```{r nest_data, cache = TRUE, warning = FALSE, message = FALSE}
+## Predicting 
+ride.Test.weekNest <- 
+  ride.Test %>%
+  nest(-week) 
+
+model_pred <- function(dat, fit){
+  pred <- predict(fit, newdata = dat)}
+
+week_predictions <- 
+  ride.Test.weekNest %>% 
+  mutate(ATime_FE = map(.x = data, fit = reg1, .f = model_pred),
+         BSpace_FE = map(.x = data, fit = reg2, .f = model_pred),
+         CTime_Space_FE = map(.x = data, fit = reg3, .f = model_pred),
+         DTime_Space_FE_timeLags = map(.x = data, fit = reg4, .f = model_pred),
+         ETime_Space_FE_timeLags_Features = map(.x = data, fit = reg5, .f = model_pred)) %>% 
+  gather(Regression, Prediction, -data, -week) %>%
+  mutate(Observed = map(data, pull, Trip_Count),
+         Absolute_Error = map2(Observed, Prediction,  ~ abs(.x - .y)),
+         MAE = map_dbl(Absolute_Error, mean, na.rm = TRUE),
+         sd_AE = map_dbl(Absolute_Error, sd, na.rm = TRUE))
+```
+
+## 6.3 Cross Validation
+
+
