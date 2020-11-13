@@ -22,9 +22,9 @@ One of the big operational challenges of bike share systems is "re-balancing" - 
 
 For making the bike-share system more efficient i.e. to re-balance it many strategies can be introduced. I think the most effect strategy would be to use a reward system. If we know the capacity of a bike station and knew that the user was going to that station we could incentivize them to drop off the bike to another bike station or we could also incentivize them to use a bike which has not been touched for more than a two weeks. This will allow for an efficient demand and supply system.
 
-Today's trend is similar to the trend tomorrow and this week's trend will be similar to next week trends. Hence, we will be able to predict how many bikes and from which station to high accuracy as you will see in the later in the model and assignment. If we know how many bikes are going to be in use, it is easier to use that data to manipulate which bikes are being used and which are not. For example, the Financial District of downtown SF is very busy and has many stations in the same block. If for some reason one station is more active than the other, we can use rewards to make people pick and drop bikes from different stations. 
+Today's trend is similar to the trend tomorrow and this week's trend will be similar to next week trends. Hence, we will be able to predict how many bikes and from which station to high accuracy as you will see in the later in the model and assignment. If we know how many rides are going to take place, it is easier to use that data to manipulate which bikes are being used and which are not. For example, the Financial District of downtown SF is very busy and has many stations in the same block. If for some reason one station is more active than the other, we can use rewards to make people pick and drop bikes from different stations. 
 
-Lyft using its platform and app to show the users where the bikes are available so that can be used to make users pick up bikes that have not been touched for a while and also have them drop it off to locations where the demand is high and there is a shortage of bikes. SFMTA already has concessions for different individuals and communities which the bike share system can tap into as well. 
+Lyft using its platform and app to show the users where the bikes are available so that can be used to make users pick up bikes that have not been touched for a while and also have them drop it off to locations where the demand is high and there is a shortage of bikes. SFMTA already has concessions for different individuals and communities which the bike share system can tap into as well. Knowing the capacity of a docking station will help us know if it has any open slots or not which can be a factor to provide users with offers to drop the bike off at other locations or if a busy dock is empty the user can be incentivized to drop off the bike there. 
 
 ## 2.0 Setup
 ### 2.1 Libraries and themes
@@ -42,6 +42,7 @@ library(gridExtra)
 library(knitr)
 library(kableExtra)
 library(RSocrata)
+library(FNN)
 
 mapTheme <- function(base_size = 12) {
   theme(
@@ -123,7 +124,7 @@ nn_function <- function(measureFrom,measureTo,k) {
 
 ### 2.2 Data Wrangling
 Reading in the bike data.
-```{r load_data, message = FALSE}
+```{r load_data, message = FALSE, warning=FALSE, results=FALSE}
 ## Read data
 sf_bike1 <- read.csv('Data/201803-fordgobike.csv')
 sf_bike2 <- read.csv('Data/201804-fordgobike.csv')
@@ -152,7 +153,8 @@ sfBike <- sf_bike %>%
 ```
 
 ### 2.3 Census Data
-```{r census, message = FALSE}
+For the analysis, I am using 2018 census data for San Francisco and Alameda county.
+```{r census, message = FALSE, results=FALSE}
 # Install Census API Key
 census_api_key("aea3dee2d96acb5101e94f3dcfa1b575f73d093a", overwrite = TRUE)
 
@@ -220,7 +222,7 @@ sfBike_census <- st_join(sfBike %>%
   mutate(end_station_longitude = unlist(map(geometry, 1)),
          end_station_latitude = unlist(map(geometry, 2)))%>%
   as.data.frame() %>%
-  na.omit(Origin.Tract, Destination.Tract)
+  na.omit(Origin.Tract, Destination.Tract) %>%
   select(-geometry)
 ```
 
@@ -606,6 +608,10 @@ week_predictions <-
 ```{r cv, cache = TRUE, warning = FALSE, message = FALSE}
 ## Cross validation
 library(caret)
+
+bikenetsample <- sample_n(ride.panel, 10 0000)%>%
+  na.omit()
+
 fitControl <- trainControl(method = "cv", 
                            number = 100,
                            savePredictions = TRUE)
@@ -616,7 +622,7 @@ set.seed(1000)
 reg.cv <-  
   train(Trip_Count ~ start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
           lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day, 
-        data = ride.panel,  
+        data = bikenetsample,  
         method = "lm",  
         trControl = fitControl,  
         na.action = na.pass)
