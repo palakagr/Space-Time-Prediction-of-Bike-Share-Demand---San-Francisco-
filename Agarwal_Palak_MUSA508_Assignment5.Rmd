@@ -624,4 +624,217 @@ reg.cv <-
 reg.cv
 ```
 
+## 7 Accuracy
 
+### 7.1 General Error Metrics 
+```{r err_1, cache = TRUE, warning = FALSE, message = FALSE}
+week_predictions <- 
+  ride.Test.weekNest %>% 
+  mutate(ATime_FE = map(.x = data, fit = reg1, .f = model_pred),
+         BSpace_FE = map(.x = data, fit = reg2, .f = model_pred),
+         CTime_Space_FE = map(.x = data, fit = reg3, .f = model_pred),
+         DTime_Space_FE_timeLags = map(.x = data, fit = reg4, .f = model_pred),
+         ETime_Space_FE_timeLags_Features = map(.x = data, fit = reg5, .f = model_pred)) %>% 
+  gather(Regression, Prediction, -data, -week) %>%
+  mutate(Observed = map(data, pull, Trip_Count),
+         Absolute_Error = map2(Observed, Prediction,  ~ abs(.x - .y)),
+         MAE = map_dbl(Absolute_Error, mean, na.rm = TRUE),
+         sd_AE = map_dbl(Absolute_Error, sd, na.rm = TRUE))
+
+## Bar plot
+week_predictions %>%
+  dplyr::select(week, Regression, MAE) %>%
+  gather(Variable, MAE, -Regression, -week) %>%
+  ggplot(aes(week, MAE)) + 
+  geom_bar(aes(fill = Regression), position = "dodge", stat="identity") +
+  scale_fill_manual(values = palette5) +
+  labs(title = "Mean Absolute Errors by model specification and week") +
+  plotTheme()
+
+## Graph
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id)) %>%
+  dplyr::select(interval60, start_station_id, Observed, Prediction, Regression) %>%
+  unnest() %>%
+  gather(Variable, Value, -Regression, -interval60, -start_station_id) %>%
+  group_by(Regression, Variable, interval60) %>%
+  summarize(Value = sum(Value)) %>%
+  ggplot(aes(interval60, Value, colour=Variable)) + 
+  geom_line(size = 1.1) + 
+  facet_wrap(~Regression, ncol=1) +
+  labs(title = "Predicted/Observed bike share time series", subtitle = "SF + Alameda",  x = "Hour", y= "Station Trips") +
+  plotTheme()
+```
+
+### 7.2 Specific Error Metrics
+```{r err_2, cache = TRUE, warning = FALSE, message = FALSE}
+## MAE by station
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id), 
+         start_station_latitude = map(data, pull, start_station_latitude), 
+         start_station_longitude = map(data, pull, start_station_longitude)) %>%
+  select(interval60, start_station_id, start_station_longitude, start_station_latitude, Observed, Prediction, Regression) %>%
+  unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags") %>%
+  group_by(start_station_id, start_station_longitude, start_station_latitude) %>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+  ggplot(.)+
+  geom_sf(data = sfTracts %>%
+            st_transform(crs=4326), colour = '#efefef')+
+  geom_point(aes(x = start_station_longitude, y = start_station_latitude, color = MAE), 
+             fill = "transparent", alpha = 0.4)+
+  scale_colour_viridis(direction = -1,
+                       discrete = FALSE, option = "D")+
+  ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
+  xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
+  labs(title="Mean Abs Error, Test Set, Model 4")+
+  mapTheme()
+```
+
+
+```{r err_3, cache = TRUE, warning = FALSE, message = FALSE}
+## Scatterplot
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id), 
+         start_station_latitude = map(data, pull, start_station_latitude), 
+         start_station_longitude = map(data, pull, start_station_longitude),
+         dotw = map(data, pull, dotw)) %>%
+  select(interval60, start_station_id, start_station_longitude, 
+         start_station_latitude, Observed, Prediction, Regression,
+         dotw) %>%
+  unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags")%>%
+  mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+         time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush"))%>%
+  ggplot()+
+  geom_point(aes(x= Observed, y = Prediction))+
+  geom_smooth(aes(x= Observed, y= Prediction), method = "lm", se = FALSE, color = "red")+
+  geom_abline(slope = 1, intercept = 0)+
+  facet_grid(time_of_day~weekend)+
+  labs(title="Observed vs Predicted",
+       x="Observed trips", 
+       y="Predicted trips")+
+  plotTheme()
+```
+
+
+```{r err_4, cache = TRUE, warning = FALSE, message = FALSE}
+##MAE by hour
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id), 
+         start_station_latitude = map(data, pull, start_station_latitude), 
+         start_station_longitude = map(data, pull, start_station_longitude),
+         dotw = map(data, pull, dotw) ) %>%
+  select(interval60, start_station_id, start_station_longitude, 
+         start_station_latitude, Observed, Prediction, Regression,
+         dotw) %>%
+  unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags")%>%
+  mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+         time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush")) %>%
+  group_by(start_station_id, weekend, time_of_day, start_station_longitude, start_station_latitude) %>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+  ggplot(.)+
+  geom_sf(data = sfTracts %>%
+            st_transform(crs=4326), colour = '#efefef')+
+  geom_point(aes(x = start_station_longitude, y = start_station_latitude, color = MAE), 
+             fill = "transparent", size = 0.5, alpha = 1.5)+
+  scale_colour_viridis(direction = -1,
+                       discrete = FALSE, option = "D")+
+  ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
+  xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
+  facet_grid(weekend~time_of_day)+
+  labs(title="Mean Absolute Errors, Test Set")+
+  mapTheme()
+```
+
+
+```{r err_5, cache = TRUE, warning = FALSE, message = FALSE}
+## Error and census
+week_predictions %>% 
+  mutate(interval60 = map(data, pull, interval60),
+         start_station_id = map(data, pull, start_station_id), 
+         start_station_latitude = map(data, pull, start_station_latitude), 
+         start_station_longitude = map(data, pull, start_station_longitude),
+         dotw = map(data, pull, dotw),
+         Percent_Taking_Public_Trans = map(data, pull, Percent_Taking_Public_Trans),
+         Med_Inc = map(data, pull, Med_Inc),
+         Percent_White = map(data, pull, Percent_White)) %>%
+  select(interval60, start_station_id, start_station_longitude, 
+         start_station_latitude, Observed, Prediction, Regression,
+         dotw, Percent_Taking_Public_Trans, Med_Inc, Percent_White) %>%
+  unnest() %>%
+  filter(Regression == "DTime_Space_FE_timeLags")%>%
+  mutate(weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday"),
+         time_of_day = case_when(hour(interval60) < 7 | hour(interval60) > 18 ~ "Overnight",
+                                 hour(interval60) >= 7 & hour(interval60) < 10 ~ "AM Rush",
+                                 hour(interval60) >= 10 & hour(interval60) < 15 ~ "Mid-Day",
+                                 hour(interval60) >= 15 & hour(interval60) <= 18 ~ "PM Rush")) %>%
+  filter(time_of_day == "AM Rush") %>%
+  group_by(start_station_id, Percent_Taking_Public_Trans, Med_Inc, Percent_White) %>%
+  summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
+  gather(-start_station_id, -MAE, key = "variable", value = "value")%>%
+  ggplot(.)+
+  #geom_sf(data = sfCensus, color = "grey", fill = "transparent")+
+  geom_point(aes(x = value, y = MAE), alpha = 0.4)+
+  geom_smooth(aes(x = value, y = MAE), method = "lm", se= FALSE)+
+  facet_wrap(~variable, scales = "free")+
+  labs(title="Errors as a function of socio-economic variables",
+       y="Mean Absolute Error (Trips)")+
+  plotTheme()
+```
+
+
+```{r animation, cache = TRUE, warning = FALSE, message = FALSE}
+## Animation
+
+library(gganimate)
+library(gifski)
+
+week11 <-
+  filter(sfBike_census , week == 11)
+
+week11.panel <-
+  expand.grid(
+    interval15 = unique(week11$interval15),
+    Pickup.Census.Tract = unique(sfBike_census$start_station_id))
+
+ride.animation.data <-
+  mutate(week11, Trip_Counter = 1) %>%
+  select(interval15, start_station_id, start_station_longitude, start_station_latitude, Trip_Counter) %>%
+  group_by(interval15, start_station_id, start_station_longitude, start_station_latitude) %>%
+  summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>% 
+  ungroup() %>% 
+  mutate(Trips = case_when(Trip_Count == 0 ~ "0 trips",
+                           Trip_Count > 0 & Trip_Count <= 2 ~ "0-2 trips",
+                           Trip_Count > 2 & Trip_Count <= 5 ~ "2-5 trips",
+                           Trip_Count > 5 & Trip_Count <= 10 ~ "5-10 trips",
+                           Trip_Count > 10 & Trip_Count <= 15 ~ "10-15 trips",
+                           Trip_Count > 15 ~ "15+ trips")) %>%
+  mutate(Trips  = fct_relevel(Trips, "0 trips","0-2 trips","2-5 trips",
+                              "5-10 trips","10-15 trips","15+ trips"))
+
+rideshare_animation <-
+  ggplot()+
+  geom_sf(data = sfTracts %>%
+            st_transform(crs=4326), colour = '#efefef')+
+  geom_point(data = ride.animation.data, 
+             aes(x = start_station_longitude, y = start_station_latitude, fill = Trips), size = 0.5, alpha = 1.5) +
+  scale_colour_manual(values = palette5) +
+  labs(title = "Rideshare pickups for one week in March 2018",
+       subtitle = "15 minute intervals: {current_frame}") +
+  transition_manual(interval15) +
+  mapTheme()
+
+animate(rideshare_animation, duration=20, renderer = gifski_renderer())
+```
