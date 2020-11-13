@@ -603,4 +603,25 @@ week_predictions <-
 
 ## 6.3 Cross Validation
 
+```{r cv, cache = TRUE, warning = FALSE, message = FALSE}
+## Cross validation
+library(caret)
+fitControl <- trainControl(method = "cv", 
+                           number = 100,
+                           savePredictions = TRUE)
+
+set.seed(1000)
+# for k-folds CV
+
+reg.cv <-  
+  train(Trip_Count ~ start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
+          lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day, 
+        data = ride.panel,  
+        method = "lm",  
+        trControl = fitControl,  
+        na.action = na.pass)
+
+reg.cv
+```
+
 
