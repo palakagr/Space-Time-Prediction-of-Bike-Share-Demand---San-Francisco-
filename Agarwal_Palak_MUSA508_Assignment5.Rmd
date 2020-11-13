@@ -227,6 +227,8 @@ sfBike_census <- st_join(sfBike %>%
 ```
 
 ## 2.5 Weather Data
+As weather plays an important factor in defining if one is likely to bike or not, e.g. "does precipitation appear to affect ridership during rush hour?". So we import weather data from SFO airport and get temperature, wind speed, precipitation on an hourly basis and plot the temperature and precipitation trends over our study period.       
+As you can see from the plot below, most days during the study months were pleasant and there wasnt much percipitation.
 ```{r import_weather, message = FALSE, warning = FALSE, cache = TRUE}
 ## Weather Data
 
@@ -263,12 +265,12 @@ ggplot(sfBike_census %>%
          group_by(interval60) %>%
          tally())+
   geom_line(aes(x = interval60, y = n))+
-  labs(title="Bike share trips per hr, SF + Alameda, March, 2018",
+  labs(title="Bike share trips per hr,\n SF + Alameda, March, 2018",
        x="Date", 
        y="Number of trips")+
   plotTheme()
 ```
-
+The below plot shows the mean number of hourly trips is high during the morning and evening rush.  
 ```{r plot2, message = FALSE, warning = FALSE, cache = TRUE}
 ## Mean number of hourly trips
 sfBike_census %>%
@@ -282,48 +284,43 @@ sfBike_census %>%
   summarize(mean_trips = mean(n))%>%
   ggplot()+
   geom_histogram(aes(mean_trips), binwidth = 1)+
-  labs(title="Mean Number of Hourly Trips Per Station. SF+Alameda, March-April, 2018",
+  labs(title="Mean Number of Hourly Trips Per Station,\nSF+Alameda, March-April, 2018",
        x="Number of trips", 
        y="Frequency")+
   facet_wrap(~time_of_day)+
   plotTheme()
-```
 
-```{r plot3, message = FALSE, warning = FALSE, cache = TRUE}
 ## By station
 ggplot(sfBike_census %>%
          group_by(interval60, start_station_name) %>%
          tally())+
-  geom_histogram(aes(n), binwidth = 5)+
-  labs(title="Bike share trips per hr by station. SF+Alameda, March-April, 2018",
+  geom_histogram(aes(n), binwidth = 2)+
+  labs(title="Bike trips per hr by station,\nSF+Alameda, March-April, 2018",
        x="Number of Stations", 
        y="Trip Counts")+
   plotTheme()
 ```
-
+The plot below shows that most bike trips are during the weekday during the morning and evening rush. A similar trend is seen in the days of the week - weekdays being busier than weekends.
 ```{r plot4, message = FALSE, warning = FALSE, cache = TRUE}
 ## Number of trips by hr in a week
 ggplot(sfBike_census %>% mutate(hour = hour(start_time)))+
   geom_freqpoly(aes(hour, color = dotw), binwidth = 1)+
-  labs(title="Bike share trips by day of the week, SF+Alameda, March-April, 2018",
+  labs(title="Bike trips by day of the week,\nSF+Alameda, March-April, 2018",
        x="Hour", 
        y="Trip Counts")+
   plotTheme()
-```
 
-```{r plot5, message = FALSE, warning = FALSE, cache = TRUE}
 ## Number of trips weekday - weekend
 ggplot(sfBike_census %>% 
          mutate(hour = hour(start_time),
                 weekend = ifelse(dotw %in% c("Sun", "Sat"), "Weekend", "Weekday")))+
   geom_freqpoly(aes(hour, color = weekend), binwidth = 1)+
-  labs(title="Bike share trips - weekend vs weekday, SF+Alameda, March-April, 2018",
+  labs(title="Bike share trips - weekend vs weekday,\nSF+Alameda, March-April, 2018",
        x="Hour", 
        y="Trip Counts")+
   plotTheme()
 ```
-
-
+Here we the station on the census tracts to see which location has a higher demand than other. As evident in the maps, Financial District in SF sees the highest number of trips overall and peaks during morning and evening rush.
 ```{r plot6, message = FALSE, warning = FALSE, cache = TRUE}
 ## Rush by station on census tracts
 ggplot()+
@@ -345,23 +342,15 @@ ggplot()+
   ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
   xlim(min(sfBike_census$start_station_longitude), max(sfBike_census$start_station_longitude))+
   facet_grid(weekend ~ time_of_day)+
-  labs(title="Bike share trips per hr by station. Chicago, May, 2018")+
+  labs(title="Bike share trips per hr by station,\nSF+Alameda, March-April, 2018")+
   mapTheme()
 ```
 
 ## 4 Create Space-Time Panel
 
-First **we have to make sure each unique station and hour/day combo exists in our data set.** This is done in order to create a "panel" (e.g. a time-series) data set where each time period in the study is represented by a row - whether an observation took place then or not. So if a station didn't have any trips originating from it at a given hour, we still need a zero in that spot in the panel.
+We create a time-series panel which basically is a unique combination of station id to the hour and day.This is done in order to create a "panel" data set where each time period in the study is represented by a row - whether an observation took place then or not. So if a station didn't have any trips originating from it at a given hour, we still need a zero in that spot in the panel.
 
-We start by determining the maximum number of combinations.
-
-Then we compare that to the actual number of combinations. We create an empty data frame `study.panel`, is created that has each unique space/time observations. This is done using the expand.grid function and unique. Along the way, we keep tabs on the number of rows our data have - `nrow` shows that the count is still correct.
-
-We then join the station name, tract and lat/lon (some have multiple lat lon info, so we just take the first one of each using `group_by` and `slice`).
-We create the full panel by summarizing counts by station for each time interval, keep census info and lat/lon information along for joining later to other data. We remove data for station IDs that are `FALSE`.
-
-We also ditch a bit of data (this is why `study.panel` and `ride.panel` don't end up being exactly the same length). There are two stations - Dusable harbor and Eastlake Terrace that don't join properly to census tracts. They are too close to the water and don't play nice with our tracts. In the service of laziness, we get rid of these.
-
+We start by determining the maximum number of combinations. Then we compare that to the actual number of combinations. We create an empty data frame study.panel, is created that has each unique space/time observations. This is done using the expand.grid function and unique. Along the way, we keep tabs on the number of rows our data have - nrow shows that the count is still correct. We then join the station name, tract and lat/lon and create the full panel by summarizing counts by station for each time interval, keep census info and lat/lon information along for joining later to other data. 
 ```{r panel_length_check, cache = TRUE, message = FALSE, warning = FALSE}
 length(unique(sfBike_census$interval60)) * length(unique(sfBike_census$start_station_id))
 
@@ -400,16 +389,9 @@ ride.panel <-
 
 ### 5.1 Time Lags
 
-Creating time lag variables will add additional nuance about the demand during a given time period - hours before and during that day. 
+As seen in the exploratory, morning and evening rush makes a difference in the demand for bikes. So here we create time lag variables which will give us additional information about the demand during a given time period. 
 
-We can also try to control for the effects of holidays that disrupt the expected demand during a given weekend or weekday. We have a holiday on May 28 - Memorial Day. For that three day weekend we could use some dummy variables indicating temporal proximity to the holiday.
-
-Keep in mind, that unique fixed effects must be in your training set when you run your models.
-
-We can evaluate the correlations in these lags. They are pretty strong. There's a Pearson's R of 0.84 for the `lagHour` - that's very, very strong. 
-
-This makes a lot of intuitive sense - the demand right now should be relatively similar to the demand tomorrow at this time, and to the demand an hour from now, but twelve hours from now, we likely expect the opposite in terms of demand.
-
+We can evaluate the correlations in these lags. As you can see from the table below it is pretty strong. There's a Pearson's R of 0.72 for the lagHour. As mentioned in the introduction, this makes sense as the demand pattern for this hour is similar to that of last year and todays pattern is similar to that of yestarday and tomorrows.
 ```{r time_lags, cache = TRUE, message = FALSE}
 ride.panel <- 
   ride.panel %>% 
@@ -442,7 +424,8 @@ as.data.frame(ride.panel) %>%
 
 
 ### 5.2 Exposure Features
-```{r exposure, cache = TRUE, message = FALSE}
+As the pick up points for the bikes, depends on the stations it is important to look at the location of these stations and factors that might affect it. Here we look at three exposure features - **proximity to parks, transit stops and tourist landmarks.** The stations tend to be clustered as the system is still expanding, so after calculating the distance to each of these features, we categorized it into categories - close (1), moderate (2) and far (3).
+```{r exposure, cache = TRUE, message = FALSE, results= FALSE}
 ##Exposure Features 
 
 ### Parks
@@ -506,39 +489,28 @@ ride.panel <-
 ride.panel <-
   ride.panel %>%
   mutate(Park = case_when(
-    park_dist > 0 & park_dist <= 500 ~ "Close",
-    park_dist > 500 & park_dist <= 1000 ~ "Moderate",
-    park_dist > 1000 ~ "Far"))
+    park_dist > 0 & park_dist <= 500 ~ "1",
+    park_dist > 500 & park_dist <= 1000 ~ "2",
+    park_dist > 1000 ~ "3"))
 
 ride.panel <-
   ride.panel %>%
   mutate(Station = case_when(
-    station_dist > 0 & station_dist <= 500 ~ "Close",
-    station_dist > 500 & station_dist <= 1000 ~ "Moderate",
-    station_dist > 1000 ~ "Far"))
+    station_dist > 0 & station_dist <= 500 ~ "1",
+    station_dist > 500 & station_dist <= 1000 ~ "3",
+    station_dist > 1000 ~ "3"))
 
 ride.panel <-
   ride.panel %>%
   mutate(Tourist = case_when(
-    tourist_dist > 0 & tourist_dist <= 500 ~ "Close",
-    tourist_dist > 500 & tourist_dist <= 1000 ~ "Moderate",
-    tourist_dist > 1000 ~ "Far"))
+    tourist_dist > 0 & tourist_dist <= 500 ~ "1",
+    tourist_dist > 500 & tourist_dist <= 1000 ~ "2",
+    tourist_dist > 1000 ~ "3"))
 ```
 
 ## 6.1 Linear Regressions
 
-We split our data into a training and a test set. We create five linear models using the `lm` funtion. Sometimes, for data such as these, Poisson distributions, designed for modeling counts, might be appropriate. I'll spare you the effort - linear models work better with this particular data set. 
-
-We create the models using our training data `ride.Train`. The first models include only temporal controls, but the later ones contain all of our lag information.
-
-Notice that we are using a partition that is user specified and is time dependent. 
-
-**Why are we splitting our data by time and not randomly??**
-
-**Why are we using the end of the month to predict for the beginning of the month?**
-
-Be aware that these models may run quite slowly depending on how large your data set is and how many variables you decide to include.
-
+We split our data into a training and a test set. We create five linear models using the `lm` function.We create the models using our training data `ride.Train`. The first models include only temporal controls, but the later ones contain all of our lag information and other exposure features modeled in the previous section.
 ```{r train_test, cache = TRUE}
 ## Regression
 ride.Train <- filter(ride.panel, week <= 12)
@@ -567,19 +539,7 @@ reg5 <-
 ```
 
 ## 6.2 Predict for test data
-
-When your models have finished running, create a nested data frame of test data by week. Nested data is common in most other programming languages. For instance, the javascript object notation file format (aka JSON) is highly nested.
-
-Nesting means that instead of merely having a "flat" file consisting of rows and columns, you have a matrix of other objects - imagine each cell in a matrix containing another matrix within it, or a list, or a list of lists. 
-
-The `purrr` package is designed to `map` functions through nested data structures. This concept is important - think of `map` as visiting each dataframe in a nested data set and applies a function to it.
-
-We create a function called `model_pred` which we can then `map` onto each data frame in our nested structure.
-
-This function is called in the code below in a few ways, one way is like so: `map(.x = data, fit = name_of_your_regression, .f = model_pred)`. Here's the important bit - the argument `fit` takes the name of a regression you have created that you want to use to make predictions, and the `.f` argument takes a function, in this case `model_pred`, which we create in order to simply execute the `predict` function.
-
-You don't need to manipulate anything else in this code block other than the `fit` argument.
-
+We create a function called `model_pred` which we can then `map` onto each data frame in our nested structure. As you can see from the table below, the MAE reduces as we add more features and temporal features to the regression.
 ```{r nest_data, cache = TRUE, warning = FALSE, message = FALSE}
 ## Predicting 
 ride.Test.weekNest <- 
@@ -601,15 +561,17 @@ week_predictions <-
          Absolute_Error = map2(Observed, Prediction,  ~ abs(.x - .y)),
          MAE = map_dbl(Absolute_Error, mean, na.rm = TRUE),
          sd_AE = map_dbl(Absolute_Error, sd, na.rm = TRUE))
+
+week_predictions
 ```
 
 ## 6.3 Cross Validation
-
+Cross validation is important as it tells us about the generalizability of a model. A good model is one which is generalizable and can be  built upon. To check our models generalizability, we take a sample of the data and run a 100 k-fold validation on it. You can see that the MAE is 0.59 which is quite low. Above table shows that the testing data had a MAE of 0.62.
 ```{r cv, cache = TRUE, warning = FALSE, message = FALSE}
 ## Cross validation
 library(caret)
 
-bikenetsample <- sample_n(ride.panel, 10 0000)%>%
+bikenetsample <- sample_n(ride.panel, 100000)%>%
   na.omit()
 
 fitControl <- trainControl(method = "cv", 
@@ -631,8 +593,10 @@ reg.cv
 ```
 
 ## 7 Accuracy
+To check how accurately our model predicts the trip count we use the Mean Absolute Error(MAE). It is imporatant to be as accurate as we can be as that will define how well our re-balancing plan would work.    
 
 ### 7.1 General Error Metrics 
+First lets see the MAE as a bar and line plot for the five different regressions. As you can see the regressions with time lags and the exposure features have lesser MAE and are closest to the observed pattern. From the line plot you can see that we are missing some peaks, so going back to find other features that affect the bike trip will make it better.
 ```{r err_1, cache = TRUE, warning = FALSE, message = FALSE}
 week_predictions <- 
   ride.Test.weekNest %>% 
@@ -656,7 +620,9 @@ week_predictions %>%
   scale_fill_manual(values = palette5) +
   labs(title = "Mean Absolute Errors by model specification and week") +
   plotTheme()
+```
 
+```{r err_gr, cache = TRUE, warning = FALSE, message = FALSE, fig.height=6, fig.width= 6}
 ## Graph
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
@@ -674,6 +640,7 @@ week_predictions %>%
 ```
 
 ### 7.2 Specific Error Metrics
+The highest error is in and around the Financial District in SF. That area has the highest bike ride number, hence why the error is also high. The CBD area is so important to SF that modeling some specific exposure features to that area might help improve the results.
 ```{r err_2, cache = TRUE, warning = FALSE, message = FALSE}
 ## MAE by station
 week_predictions %>% 
@@ -698,9 +665,8 @@ week_predictions %>%
   labs(title="Mean Abs Error, Test Set, Model 4")+
   mapTheme()
 ```
-
-
-```{r err_3, cache = TRUE, warning = FALSE, message = FALSE}
+The ridership is high during the weekday as compared to the weekend, hence why the errors are higher in the weekday predictions. Similar observations can be made while looking at the time of the day i.e. the morning to night rush. This has been visualized both as a scatter plot and a spatial plot as seen below.
+```{r err_3, cache = TRUE, warning = FALSE, message = FALSE, fig.height=6}
 ## Scatterplot
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
@@ -728,8 +694,6 @@ week_predictions %>%
        y="Predicted trips")+
   plotTheme()
 ```
-
-
 ```{r err_4, cache = TRUE, warning = FALSE, message = FALSE}
 ##MAE by hour
 week_predictions %>% 
@@ -763,8 +727,7 @@ week_predictions %>%
   labs(title="Mean Absolute Errors, Test Set")+
   mapTheme()
 ```
-
-
+For any model to be accurate, it should be able to predict well in all tracts despite its make. Here we plot the error as a function of income, percentage of white and percentage taking public transit. As you can see the models error increases in tracts where the income is high which can be due to many factors. While the model has a constant error across percent taking transit and white, which says the model does well in all neighborhoods and communities.
 ```{r err_5, cache = TRUE, warning = FALSE, message = FALSE}
 ## Error and census
 week_predictions %>% 
@@ -799,8 +762,7 @@ week_predictions %>%
        y="Mean Absolute Error (Trips)")+
   plotTheme()
 ```
-
-
+Last lets look at the trip count by station as an animation for one week during March.
 ```{r animation, cache = TRUE, warning = FALSE, message = FALSE}
 ## Animation
 
