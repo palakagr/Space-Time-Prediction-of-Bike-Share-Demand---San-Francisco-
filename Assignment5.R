@@ -338,7 +338,8 @@ ride.panel <-
 
 ride.panel <-
   ride.panel %>%
-  st_as_sf(coords = c("start_station_longitude", "start_station_latitude"), crs = 4326, agr = "constant") %>%
+  mutate(X = start_station_longitude, Y = start_station_latitude )%>%
+  st_as_sf(coords = c("X", "Y"), crs = 4326, agr = "constant") %>%
   st_transform('ESRI:102241')
   
 ##Exposure Features 
@@ -502,10 +503,10 @@ week_predictions %>%
   ggplot(aes(interval60, Value, colour=Variable)) + 
   geom_line(size = 1.1) + 
   facet_wrap(~Regression, ncol=1) +
-  labs(title = "Predicted/Observed bike share time series", subtitle = "Chicago; A test set of 2 weeks",  x = "Hour", y= "Station Trips") +
+  labs(title = "Predicted/Observed bike share time series", subtitle = "SF + Alameda",  x = "Hour", y= "Station Trips") +
   plotTheme()
 
-
+## MAE by station
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
          start_station_id = map(data, pull, start_station_id), 
@@ -517,7 +518,8 @@ week_predictions %>%
   group_by(start_station_id, start_station_longitude, start_station_latitude) %>%
   summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
   ggplot(.)+
-  geom_sf(data = sfCensus, color = "grey", fill = "transparent")+
+  geom_sf(data = sfTracts %>%
+            st_transform(crs=4326), colour = '#efefef')+
   geom_point(aes(x = start_station_longitude, y = start_station_latitude, color = MAE), 
              fill = "transparent", alpha = 0.4)+
   scale_colour_viridis(direction = -1,
@@ -527,6 +529,7 @@ week_predictions %>%
   labs(title="Mean Abs Error, Test Set, Model 4")+
   mapTheme()
 
+## Scatterplot
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
          start_station_id = map(data, pull, start_station_id), 
@@ -553,7 +556,7 @@ week_predictions %>%
        y="Predicted trips")+
   plotTheme()
 
-
+##MAE by hour
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
          start_station_id = map(data, pull, start_station_id), 
@@ -573,9 +576,10 @@ week_predictions %>%
   group_by(start_station_id, weekend, time_of_day, start_station_longitude, start_station_latitude) %>%
   summarize(MAE = mean(abs(Observed-Prediction), na.rm = TRUE))%>%
   ggplot(.)+
-  geom_sf(data = sfCensus, color = "grey", fill = "transparent")+
+  geom_sf(data = sfTracts %>%
+            st_transform(crs=4326), colour = '#efefef')+
   geom_point(aes(x = start_station_longitude, y = start_station_latitude, color = MAE), 
-             fill = "transparent", size = 0.5, alpha = 0.4)+
+             fill = "transparent", size = 0.5, alpha = 1.5)+
   scale_colour_viridis(direction = -1,
                        discrete = FALSE, option = "D")+
   ylim(min(sfBike_census$start_station_latitude), max(sfBike_census$start_station_latitude))+
@@ -584,6 +588,8 @@ week_predictions %>%
   labs(title="Mean Absolute Errors, Test Set")+
   mapTheme()
 
+
+## Error and census
 week_predictions %>% 
   mutate(interval60 = map(data, pull, interval60),
          start_station_id = map(data, pull, start_station_id), 
@@ -632,25 +638,26 @@ week11.panel <-
 
 ride.animation.data <-
   mutate(week11, Trip_Counter = 1) %>%
-  right_join(week11.panel) %>% 
-  group_by(interval15, Pickup.Census.Tract) %>%
+  select(interval15, start_station_id, start_station_longitude, start_station_latitude, Trip_Counter) %>%
+  group_by(interval15, start_station_id, start_station_longitude, start_station_latitude) %>%
   summarize(Trip_Count = sum(Trip_Counter, na.rm=T)) %>% 
   ungroup() %>% 
-  left_join(sfTracts, by=c("Pickup.Census.Tract" = "GEOID")) %>%
-  st_sf() %>%
   mutate(Trips = case_when(Trip_Count == 0 ~ "0 trips",
-                           Trip_Count > 0 & Trip_Count <= 30 ~ "1-30 trips",
-                           Trip_Count > 30 & Trip_Count <= 60 ~ "30-60 trips",
-                           Trip_Count > 60 & Trip_Count <= 90 ~ "60-90 trips",
-                           Trip_Count > 90 & Trip_Count <= 150 ~ "90-150 trips",
-                           Trip_Count > 150 ~ "150+ trips")) %>%
-  mutate(Trips  = fct_relevel(Trips, "0 trips","1-30 trips","30-60 trips",
-                              "60-90 trips","90-150 trips","150+ trips"))
+                           Trip_Count > 0 & Trip_Count <= 2 ~ "0-2 trips",
+                           Trip_Count > 2 & Trip_Count <= 5 ~ "2-5 trips",
+                           Trip_Count > 5 & Trip_Count <= 10 ~ "5-10 trips",
+                           Trip_Count > 10 & Trip_Count <= 15 ~ "10-15 trips",
+                           Trip_Count > 15 ~ "15+ trips")) %>%
+  mutate(Trips  = fct_relevel(Trips, "0 trips","0-2 trips","2-5 trips",
+                              "5-10 trips","10-15 trips","15+ trips"))
 
 rideshare_animation <-
-  ggplot() +
-  geom_sf(data = ride.animation.data, aes(fill = Trips)) +
-  scale_fill_manual(values = palette5) +
+  ggplot()+
+  geom_sf(data = sfTracts %>%
+            st_transform(crs=4326), colour = '#efefef')+
+  geom_point(data = ride.animation.data, 
+             aes(x = start_station_longitude, y = start_station_latitude, fill = Trips), size = 0.5, alpha = 1.5) +
+  scale_colour_manual(values = palette5) +
   labs(title = "Rideshare pickups for one week in March 2018",
        subtitle = "15 minute intervals: {current_frame}") +
   transition_manual(interval15) +
@@ -667,9 +674,9 @@ fitControl <- trainControl(method = "cv",
 # for k-folds CV
 
 reg.cv <-  
-  train(Trip_Count ~ . , data = st_drop_geometry(ride.panel) %>% 
-          dplyr::select(start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
-          lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day),  
+  train(Trip_Count ~ start_station_name +  hour(interval60) + dotw + Temperature + Precipitation +
+          lagHour + lag2Hours +lag3Hours + lag12Hours + lag1day, 
+        data = ride.panel,  
         method = "lm",  
         trControl = fitControl,  
         na.action = na.pass)
