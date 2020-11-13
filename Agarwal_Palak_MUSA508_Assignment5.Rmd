@@ -99,6 +99,26 @@ q5 <- function(variable) {as.factor(ntile(variable, 5))}
 palette5 <- c("#eff3ff","#bdd7e7","#6baed6","#3182bd","#08519c")
 palette4 <- c("#D2FBD4","#92BCAB","#527D82","#123F5A")
 palette2 <- c("#6baed6","#08519c")
+
+# Functions
+nn_function <- function(measureFrom,measureTo,k) {
+  measureFrom_Matrix <- as.matrix(measureFrom)
+  measureTo_Matrix <- as.matrix(measureTo)
+  nn <-   
+    get.knnx(measureTo, measureFrom, k)$nn.dist
+  output <-
+    as.data.frame(nn) %>%
+    rownames_to_column(var = "thisPoint") %>%
+    gather(points, point_distance, V1:ncol(.)) %>%
+    arrange(as.numeric(thisPoint)) %>%
+    group_by(thisPoint) %>%
+    summarize(pointDistance = mean(point_distance)) %>%
+    arrange(as.numeric(thisPoint)) %>% 
+    dplyr::select(-thisPoint) %>%
+    pull()
+  
+  return(output)  
+}
 ```
 
 ### 2.2 Data Wrangling
@@ -145,7 +165,7 @@ sfCensus <-
           year = 2018, 
           state = 06, 
           geometry = TRUE, 
-          county=c(001,075,081,013,085),
+          county=c(001,075),
           output = "wide") %>%
   rename(Total_Pop =  B01003_001E,
          Med_Inc = B19013_001E,
@@ -179,7 +199,7 @@ Now lets add the spatial information to our bikeshare data as origin and destina
 sfBike_census <- st_join(sfBike %>% 
                         filter(is.na(start_station_longitude) == FALSE &
                                  is.na(start_station_latitude) == FALSE &
-                                 is.na(end_station_latitude) == FALSE &
+                                 is.na(end_station_latitude) == FALSE  &
                                  is.na(end_station_longitude) == FALSE) %>%
                         st_as_sf(., coords = c("start_station_longitude", "start_station_latitude"), crs = 4326),
                       sfTracts %>%
@@ -200,5 +220,49 @@ sfBike_census <- st_join(sfBike %>%
   mutate(end_station_longitude = unlist(map(geometry, 1)),
          end_station_latitude = unlist(map(geometry, 2)))%>%
   as.data.frame() %>%
+  na.omit(Origin.Tract, Destination.Tract)
   select(-geometry)
+```
+
+## 2.5 Weather Data
+```{r import_weather, message = FALSE, warning = FALSE, cache = TRUE}
+## Weather Data
+
+weather.Panel <- 
+  riem_measures(station = "SFO", date_start = "2018-03-01", date_end = "2018-04-30") %>%
+  dplyr::select(valid, tmpf, p01i, sknt)%>%
+  replace(is.na(.), 0) %>%
+  mutate(interval60 = ymd_h(substr(valid,1,13))) %>%
+  mutate(week = week(interval60),
+         dotw = wday(interval60, label=TRUE)) %>%
+  group_by(interval60) %>%
+  summarize(Temperature = max(tmpf),
+            Precipitation = sum(p01i),
+            Wind_Speed = max(sknt)) %>%
+  mutate(Temperature = ifelse(Temperature == 0, 42, Temperature))
+
+grid.arrange(
+  ggplot(weather.Panel, aes(interval60,Precipitation)) + geom_line() + 
+    labs(title="Percipitation", x="Hour", y="Perecipitation") + plotTheme(),
+  ggplot(weather.Panel, aes(interval60,Wind_Speed)) + geom_line() + 
+    labs(title="Wind Speed", x="Hour", y="Wind Speed") + plotTheme(),
+  ggplot(weather.Panel, aes(interval60,Temperature)) + geom_line() + 
+    labs(title="Temperature", x="Hour", y="Temperature") + plotTheme(),
+  top="Weather Data - San Francisco SFO - March-April, 2018")
+```
+
+## 3.1. Data Exploration
+
+We begin by examining the time and frequency components of our data.
+
+First, we look at the overall time pattern - there is clearly a daily periodicity and there are lull periods on weekends.
+```{r plot1, message = FALSE, warning = FALSE, cache = TRUE}
+ggplot(sfBike_census %>%
+         group_by(interval60) %>%
+         tally())+
+  geom_line(aes(x = interval60, y = n))+
+  labs(title="Bike share trips per hr, SF + Alameda, March, 2018",
+       x="Date", 
+       y="Number of trips")+
+  plotTheme()
 ```
